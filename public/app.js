@@ -240,17 +240,6 @@ function showResultAnimation(type, amount) {
 function fetchUserHistory() {
     if (!currentUser) return alert("Please login first!");
     
-    socket.emit('get_my_history', (res) => {
-        // Fallback added: Even if backend throws error, empty array pass hoga and modal khulega
-        const deposits = (res && res.deposits) ? res.deposits : [];
-        const withdrawals = (res && res.withdrawals) ? res.withdrawals : [];
-        
-        renderUserHistory(deposits, withdrawals);
-        openModal('historyModal');
-    });
-}
-
-    
     // Need backend event 'get_my_history' to return user's data
     socket.emit('get_my_history', (res) => {
         if(res && res.success) {
