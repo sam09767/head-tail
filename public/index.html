@@ -11,32 +11,32 @@
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
 
-    <!-- Top Navigation Header (Duplicates Removed) -->
-    <header class="glass-panel border-b border-slate-800 p-3 md:p-4 sticky top-0 z-40 flex flex-wrap md:flex-nowrap justify-between items-center w-[96%] max-w-5xl mx-auto mt-3 rounded-2xl gap-3 shadow-xl shadow-black/50">
-        
-        <div class="flex items-center space-x-2 md:space-x-3 cursor-pointer select-none" id="brandLogo">
-            <div class="w-8 h-8 md:w-10 md:h-10 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 font-black text-lg md:text-xl shadow-lg shadow-amber-500/20">C</div>
-            <span class="text-lg md:text-xl font-extrabold tracking-wider bg-gradient-to-r from-amber-400 to-yellow-200 bg-clip-text text-transparent">COIN3D</span>
+    <!-- Top Navigation Header -->
+    <header class="glass-panel border-b border-slate-800 p-4 sticky top-0 z-40 flex justify-between items-center w-full max-w-5xl mx-auto mt-4 rounded-2xl">
+        <div class="flex items-center space-x-3 cursor-pointer select-none" id="brandLogo">
+            <div class="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">C</div>
+            <span class="text-xl font-extrabold tracking-wider bg-gradient-to-r from-amber-400 to-yellow-200 bg-clip-text text-transparent">COIN3D</span>
         </div>
         
         <!-- Last Rounds History -->
         <div class="hidden md:flex flex-col items-center">
-            <span class="text-[10px] text-slate-400 font-bold mb-1">LAST ROUNDS</span>
-            <div id="history" class="flex space-x-2"></div>
-        </div>
-
-        <!-- User Logged In State -->
-        <div id="userState" class="hidden flex flex-wrap justify-end items-center gap-2 md:gap-3">
-            <div class="bg-slate-800 border border-slate-700 px-3 py-1 md:py-1.5 rounded-full flex items-center space-x-2">
-                <span class="text-[10px] md:text-xs text-slate-400">Bal:</span>
-                <span id="walletBalance" class="balance-badge text-sm md:text-base">₹0</span>
+            <span class="text-xs text-slate-400 font-bold mb-1">LAST ROUNDS</span>
+            <div id="history" class="flex space-x-2">
+                <!-- History badges inject hongi JS se -->
             </div>
-            <button onclick="openModal('depositModal')" class="bg-emerald-600 hover:bg-emerald-500 px-2 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-xs md:text-sm font-bold transition shadow-lg">Deposit</button>
-            <button onclick="openModal('withdrawModal')" class="bg-slate-700 hover:bg-slate-600 px-2 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-xs md:text-sm font-bold transition">Withdraw</button>
-            <button onclick="fetchUserHistory()" class="bg-blue-600 hover:bg-blue-500 px-2 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-xs md:text-sm font-bold transition">History</button>
         </div>
 
-        <button id="authBtn" onclick="openModal('authModal')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-1.5 md:px-5 md:py-2 rounded-lg transition shadow-lg shadow-amber-500/20 text-sm md:text-base">Login</button>
+        <div id="userState" class="hidden flex items-center space-x-3">
+            <div class="bg-slate-800 border border-slate-700 px-4 py-1.5 rounded-full flex items-center space-x-2">
+                <span class="text-xs text-slate-400">Bal:</span>
+                <span id="walletBalance" class="balance-badge">₹0</span>
+            </div>
+            <button onclick="openModal('depositModal')" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition shadow-lg">Deposit</button>
+            <button onclick="openModal('withdrawModal')" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Withdraw</button>
+            <button onclick="fetchUserHistory()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition">History</button>
+        </div>
+
+        <button id="authBtn" onclick="openModal('authModal')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-lg transition shadow-lg shadow-amber-500/20">Login / Register</button>
     </header>
 
     <!-- Main Game Canvas -->
@@ -60,7 +60,7 @@
             <div class="coin-shadow"></div>
         </div>
 
-        <!-- Bet Controls -->
+        <!-- Bet Controls (Total Bets hidden for normal users) -->
         <div class="betting-section glass-panel w-full">
             <div class="chips-container">
                 <button onclick="setChip(100)" class="chip-btn">₹100</button>
@@ -98,7 +98,7 @@
                 <button onclick="handleDirectAuth(true)" class="bg-slate-800 hover:bg-slate-700 font-bold py-3 rounded-lg">Sign Up</button>
             </div>
             <p id="authMsg" class="text-xs text-center text-red-400"></p>
-            <button onclick="closeModal('authModal')" class="w-full text-sm text-slate-500 mt-2 hover:text-white">Cancel</button>
+            <button onclick="closeModal('authModal')" class="w-full text-sm text-slate-500 mt-2">Cancel</button>
         </div>
     </div>
 
@@ -127,23 +127,23 @@
     </div>
 
     <!-- User Transaction History Modal -->
-    <div id="historyModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="glass-panel max-w-md w-full p-6 space-y-4">
-            <div class="flex justify-between items-center border-b border-slate-700 pb-2">
+    <div id="historyModal" class="modal">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
                 <h2 class="text-xl font-bold text-white">My Transactions</h2>
-                <button onclick="closeModal('historyModal')" class="text-slate-400 hover:text-white text-3xl leading-none">&times;</button>
+                <button onclick="closeModal('historyModal')" class="close-btn">&times;</button>
             </div>
-            <div class="space-y-4 max-h-[60vh] overflow-y-auto pr-2">
+            <div class="space-y-4 max-h-[60vh] overflow-y-auto">
                 <div>
-                    <h3 class="font-bold text-emerald-400 mb-2 text-sm uppercase tracking-wide">Deposits</h3>
-                    <table class="w-full text-white text-sm text-left">
-                        <tbody id="userDepositHistory" class="divide-y divide-slate-800"></tbody>
+                    <h3 class="font-bold text-emerald-400 mb-2">Deposits</h3>
+                    <table class="history-table w-full text-white">
+                        <tbody id="userDepositHistory"></tbody>
                     </table>
                 </div>
                 <div class="mt-4">
-                    <h3 class="font-bold text-amber-400 mb-2 text-sm uppercase tracking-wide">Withdrawals</h3>
-                    <table class="w-full text-white text-sm text-left">
-                        <tbody id="userWithdrawHistory" class="divide-y divide-slate-800"></tbody>
+                    <h3 class="font-bold text-amber-400 mb-2">Withdrawals</h3>
+                    <table class="history-table w-full text-white">
+                        <tbody id="userWithdrawHistory"></tbody>
                     </table>
                 </div>
             </div>
@@ -152,7 +152,6 @@
 
     <!-- Hidden Admin Panel Modal -->
     <div id="adminModal" class="hidden fixed inset-0 bg-black/95 z-50 p-4 overflow-y-auto">
-        <!-- ... (Admin modal is identical to your original code, kept intact) ... -->
         <div id="adminAuthSection" class="max-w-sm mx-auto my-20 glass-panel p-6 space-y-4">
             <h2 class="text-xl font-bold text-center text-red-500">Admin Authentication</h2>
             <input id="adminPass" type="password" placeholder="Admin Secret Password" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
@@ -166,7 +165,7 @@
                 <button onclick="closeModal('adminModal')" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg font-bold text-white transition">Close Panel</button>
             </div>
 
-            <!-- LIVE TOTAL BETS -->
+            <!-- LIVE TOTAL BETS (Only Visible to Admin) -->
             <div class="grid grid-cols-2 gap-4">
                 <div class="glass-panel p-4 text-center border-l-4 border-amber-500">
                     <p class="text-xs text-slate-400 font-bold mb-1">LIVE HEADS BETS</p>
@@ -178,6 +177,7 @@
                 </div>
             </div>
 
+            <!-- Stats & Smart Edge Controls -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div class="glass-panel p-4">
                     <p class="text-xs text-slate-400 font-bold">Net House Profit</p>
@@ -197,11 +197,13 @@
                 </div>
             </div>
 
+            <!-- Global Settings -->
             <div class="glass-panel p-4 flex flex-col md:flex-row items-center gap-4">
                 <input id="admUpiInput" type="text" placeholder="Active Receiver UPI" class="flex-1 w-full bg-slate-950 border border-slate-700 p-3 rounded text-white font-bold">
                 <button onclick="saveAdminUpi()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-6 py-3 rounded-lg font-bold w-full md:w-auto shadow-lg">Update Receiver UPI</button>
             </div>
 
+            <!-- Users & Pending Requests -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="glass-panel p-4 space-y-2">
                     <h3 class="font-bold border-b border-slate-700 pb-2 text-white">Pending Deposits</h3>
