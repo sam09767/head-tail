@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Coin Flip Casino</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
         
@@ -40,10 +41,11 @@
             height: 100%;
             border-radius: 50%;
             backface-visibility: hidden;
+            -webkit-backface-visibility: hidden;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 3rem;
+            font-size: 4rem;
             font-weight: bold;
             background: linear-gradient(135deg, #fbbf24 0%, #d97706 50%, #fbbf24 100%);
             border: 4px solid #f59e0b;
@@ -152,6 +154,15 @@
         .slide-in {
             animation: slideIn 0.3s ease-out;
         }
+        
+        @keyframes coinSpin {
+            0% { transform: rotateY(0deg) rotateX(0deg); }
+            100% { transform: rotateY(1800deg) rotateX(720deg); }
+        }
+        
+        .spinning {
+            animation: coinSpin 2s ease-out forwards;
+        }
     </style>
 </head>
 <body class="text-slate-200">
@@ -214,10 +225,10 @@
                 <div class="bg-slate-800/80 rounded-xl p-6">
                     <h3 class="text-xl font-bold mb-4 text-amber-400">Place Your Bet</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                        <button onclick="placeBet('HEADS')" id="headsBetBtn" class="btn-primary text-lg py-4">
+                        <button onclick="selectSide('HEADS')" id="headsBetBtn" class="btn-primary text-lg py-4">
                             HEADS (H)
                         </button>
-                        <button onclick="placeBet('TAILS')" id="tailsBetBtn" class="btn-primary text-lg py-4">
+                        <button onclick="selectSide('TAILS')" id="tailsBetBtn" class="btn-primary text-lg py-4">
                             TAILS (T)
                         </button>
                     </div>
@@ -241,75 +252,3 @@
                     <h3 class="text-lg font-bold mb-4 text-amber-400">Current Round</h3>
                     <div class="space-y-3">
                         <div class="flex justify-between">
-                            <span>HEADS Total:</span>
-                            <span id="headsTotal" class="font-bold text-green-400">₹0</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span>TAILS Total:</span>
-                            <span id="tailsTotal" class="font-bold text-blue-400">₹0</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span>Total Bets:</span>
-                            <span id="totalBets" class="font-bold">₹0</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Recent Results -->
-                <div class="bg-slate-800/80 rounded-xl p-6">
-                    <h3 class="text-lg font-bold mb-4 text-amber-400">Recent Results</h3>
-                    <div id="recentResults" class="flex flex-wrap gap-2">
-                        <!-- Results will be displayed here -->
-                    </div>
-                </div>
-
-                <!-- Live Users -->
-                <div class="bg-slate-800/80 rounded-xl p-6">
-                    <h3 class="text-lg font-bold mb-4 text-amber-400">Online Players</h3>
-                    <div id="onlineUsers" class="space-y-2">
-                        <!-- Online users will be displayed here -->
-                    </div>
-                </div>
-            </div>
-        </div>
-    </main>
-
-    <!-- Auth Modal -->
-    <div id="authModal" class="modal">
-        <div class="bg-slate-800 rounded-xl p-8 max-w-md w-full slide-in">
-            <h2 class="text-2xl font-bold mb-6 text-center text-amber-400">Welcome to CoinFlip</h2>
-            <div class="space-y-4">
-                <input type="text" id="authUsername" class="input-field" placeholder="Username">
-                <input type="password" id="authPassword" class="input-field" placeholder="Password">
-                <div class="flex gap-4">
-                    <button onclick="login()" class="btn-primary flex-1">Login</button>
-                    <button onclick="signup()" class="btn-secondary flex-1">Sign Up</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Deposit Modal -->
-    <div id="depositModal" class="modal">
-        <div class="bg-slate-800 rounded-xl p-8 max-w-md w-full slide-in">
-            <h2 class="text-2xl font-bold mb-6 text-center text-amber-400">Deposit Funds</h2>
-            <div class="space-y-4">
-                <div class="text-center mb-4">
-                    <p class="text-sm text-slate-400 mb-2">Scan QR Code to Pay</p>
-                    <img id="qrCode" src="" alt="QR Code" class="mx-auto w-48 h-48 bg-white p-2 rounded-lg">
-                    <p class="mt-2 text-sm text-amber-300" id="upiDisplay"></p>
-                </div>
-                <div class="space-y-3">
-                    <input type="number" id="depositAmount" class="input-field" placeholder="Amount" min="10">
-                    <input type="text" id="txnId" class="input-field" placeholder="Transaction ID">
-                    <button onclick="submitDeposit()" class="btn-primary w-full">Submit Deposit</button>
-                </div>
-                <button onclick="closeModal('depositModal')" class="text-slate-400 hover:text-white">Cancel</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Withdrawal Modal -->
-    <div id="withdrawalModal" class="modal">
-        <div class="bg-slate-800 rounded-xl p-8 max-w-md w-full slide-in">
-            <h2 class="text-2xl font-bold mb-6 text-center
