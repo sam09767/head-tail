@@ -2,208 +2,205 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Coin Flip Casino</title>
+    <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <style>
-        :root {
-            --bg-dark: #0f172a; --bg-card: #1e293b; --gold: #eab308;
-            --gold-glow: rgba(234, 179, 8, 0.4); --text-light: #f8fafc;
-            --win: #22c55e; --lose: #ef4444;
+        .coin-arena { perspective: 1000px; }
+        .coin {
+            width: 160px;
+            height: 160px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 3s cubic-bezier(0.15, 0.85, 0.35, 1.2);
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        body { background-color: var(--bg-dark); color: var(--text-light); overflow-x: hidden; }
-        
-        /* Navbar */
-        .navbar { display: flex; justify-content: space-between; padding: 15px 20px; background: var(--bg-card); border-bottom: 2px solid var(--gold); }
-        .logo { font-size: 1.5rem; font-weight: 900; color: var(--gold); cursor: pointer; user-select: none; }
-        .wallet { display: flex; gap: 10px; align-items: center; }
-        .balance { font-size: 1.2rem; font-weight: bold; background: rgba(255,255,255,0.1); padding: 5px 15px; border-radius: 20px; }
-        .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff; text-transform: uppercase; }
-        .btn-gold { background: var(--gold); color: #000; }
-        .btn-green { background: var(--win); }
-        .btn-red { background: var(--lose); }
-
-        /* Game Arena */
-        .arena { text-align: center; padding: 30px 20px; }
-        .timer-box { font-size: 2rem; font-weight: 900; color: var(--gold); margin-bottom: 5px; text-shadow: 0 0 10px var(--gold-glow); }
-        .round-info { font-size: 0.9rem; color: #94a3b8; margin-bottom: 30px; }
-
-        /* 3D Coin */
-        .coin-container { perspective: 1000px; width: 150px; height: 150px; margin: 0 auto 30px; }
-        .coin { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 1.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
-        .face { position: absolute; width: 100%; height: 100%; border-radius: 50%; backface-visibility: hidden; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 900; box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 0 30px var(--gold-glow); border: 4px solid var(--gold); }
-        .heads { background: radial-gradient(#fbbf24, #b45309); color: #000; }
-        .tails { background: radial-gradient(#94a3b8, #334155); color: #fff; transform: rotateY(180deg); }
-
-        /* Controls */
-        .bet-controls { display: flex; flex-direction: column; gap: 15px; max-width: 400px; margin: 0 auto; }
-        .bet-input { width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #334155; background: var(--bg-dark); color: #fff; font-size: 1.2rem; text-align: center; outline: none; }
-        .bet-input:focus { border-color: var(--gold); }
-        .btn-group { display: flex; gap: 10px; }
-        .btn-group .btn { flex: 1; padding: 15px; font-size: 1.1rem; }
-
-        /* History & Feed */
-        .history-strip { display: flex; gap: 5px; justify-content: center; margin: 20px 0; overflow-x: auto; padding: 10px; }
-        .chip { width: 35px; height: 35px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem; border: 2px solid var(--gold); }
-        .chip.heads { background: #b45309; color: #fff; }
-        .chip.tails { background: #334155; color: #fff; }
-        .marquee { background: var(--bg-card); padding: 10px; font-size: 0.9rem; overflow: hidden; white-space: nowrap; border-top: 1px solid #334155; position: fixed; bottom: 0; width: 100%; }
-        .feed-item { display: inline-block; margin-right: 30px; color: var(--gold); }
-
-        /* Modals */
-        .modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(5px); }
-        .modal-content { background: var(--bg-card); padding: 25px; border-radius: 15px; width: 90%; max-width: 400px; border: 1px solid #334155; text-align: center; }
-        .modal input { width: 100%; margin-bottom: 15px; padding: 12px; background: var(--bg-dark); border: 1px solid #334155; color: #fff; border-radius: 8px; }
-        .qr-code { width: 200px; height: 200px; margin: 15px auto; background: #fff; padding: 10px; border-radius: 10px; }
-        .close { color: #94a3b8; float: right; cursor: pointer; font-size: 1.5rem; margin-top: -10px; }
-        
-        /* Win Overlay */
-        #winOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 200; align-items: center; justify-content: center; background: radial-gradient(circle, rgba(34,197,94,0.2) 0%, transparent 70%); }
-        .win-text { font-size: 4rem; color: var(--win); font-weight: 900; text-shadow: 0 0 20px #000; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; transform: scale(0); }
-        @keyframes popIn { to { transform: scale(1); } }
+        .coin-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.75rem;
+            font-weight: 800;
+            border: 4px solid #f59e0b;
+            box-shadow: 0 0 25px rgba(245, 158, 11, 0.4);
+        }
+        .heads { background: linear-gradient(135deg, #fbbf24, #d97706); color: #1e293b; }
+        .tails { background: linear-gradient(135deg, #f59e0b, #b45309); color: #ffffff; transform: rotateY(180deg); }
     </style>
 </head>
-<body>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
 
-    <nav class="navbar">
-        <div class="logo" id="brandBtn">COIN3D</div>
-        <div class="wallet">
-            <span class="balance" id="walletBalance">₹0</span>
-            <button class="btn btn-green" id="openDepositBtn">Dep</button>
-            <button class="btn btn-red" id="openWithdrawBtn">Wdr</button>
-        </div>
-    </nav>
-
-    <div class="arena">
-        <div class="timer-box" id="countdownTimer">30s</div>
-        <div class="round-info">
-            <span id="roundIdText">#Loading</span> | <span id="istTimeText">Syncing IST...</span>
-        </div>
-
-        <div class="coin-container">
-            <div class="coin" id="coin3d">
-                <div class="face heads">HEADS</div>
-                <div class="face tails">TAILS</div>
-            </div>
+    <!-- Top Navigation Header -->
+    <header class="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-40 flex justify-between items-center">
+        <div class="flex items-center space-x-3 cursor-pointer select-none" id="brandLogo">
+            <div class="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">C</div>
+            <span class="text-xl font-extrabold tracking-wider bg-gradient-to-r from-amber-400 to-yellow-200 bg-clip-text text-transparent">COIN3D</span>
         </div>
         
-        <h3 id="resultText" style="margin-bottom: 20px; height: 20px; color: var(--gold);"></h3>
-
-        <div class="bet-controls">
-            <input type="number" id="betAmountInput" class="bet-input" placeholder="Enter Bet Amount (₹)" min="10">
-            <div class="btn-group">
-                <button class="btn btn-gold" onclick="setBetAmount(100)">+100</button>
-                <button class="btn btn-gold" onclick="setBetAmount(500)">+500</button>
-                <button class="btn btn-gold" onclick="setBetAmount(1000)">+1000</button>
+        <div id="userState" class="hidden flex items-center space-x-4">
+            <div class="bg-slate-800 border border-slate-700 px-4 py-1.5 rounded-full flex items-center space-x-2">
+                <span class="text-xs text-slate-400">Balance:</span>
+                <span id="walletBalance" class="text-amber-400 font-bold">₹0</span>
             </div>
-            <div class="btn-group" style="margin-top: 10px;">
-                <button class="btn" style="background:#b45309" onclick="placeBet('HEADS')">BET HEADS (2x)</button>
-                <button class="btn" style="background:#334155" onclick="placeBet('TAILS')">BET TAILS (2x)</button>
-            </div>
-            <p id="statusMsg" style="font-size: 0.9rem; font-weight: bold; margin-top: 10px;"></p>
+            <button onclick="openModal('depositModal')" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Deposit</button>
+            <button onclick="openModal('withdrawModal')" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Withdraw</button>
         </div>
-    </div>
 
-    <div class="history-strip" id="historyChips"></div>
+        <button id="authBtn" onclick="openModal('authModal')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-lg transition">Login / Register</button>
+    </header>
 
-    <div class="marquee">
-        <marquee behavior="scroll" direction="left" id="betsFeed">
-            <span class="feed-item">Waiting for bets...</span>
-        </marquee>
-    </div>
+    <!-- Main Game Canvas -->
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col justify-between space-y-6">
+        
+        <!-- Game Header & Timer -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
+            <div class="flex justify-between items-center text-sm text-slate-400">
+                <span>Next Spin In</span>
+                <span id="history" class="flex space-x-1"></span>
+            </div>
+            <div id="timerDisplay" class="text-5xl font-black text-amber-400">00:30</div>
+            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                <div id="timerBar" class="bg-amber-400 h-full w-full transition-all duration-1000"></div>
+            </div>
+        </div>
+
+        <!-- 3D Coin Arena -->
+        <div class="coin-arena flex justify-center items-center py-8">
+            <div id="coin" class="coin">
+                <div class="coin-face heads">HEADS</div>
+                <div class="coin-face tails">TAILS</div>
+            </div>
+        </div>
+
+        <!-- Live Round Totals -->
+        <div class="grid grid-cols-2 gap-4">
+            <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400">HEADS BETS</p>
+                <p id="headsTotal" class="text-xl font-bold text-amber-400">₹0</p>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-center">
+                <p class="text-xs text-slate-400">TAILS BETS</p>
+                <p id="tailsTotal" class="text-xl font-bold text-amber-500">₹0</p>
+            </div>
+        </div>
+
+        <!-- Bet Controls -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
+            <div class="flex justify-between space-x-2">
+                <button onclick="setChip(100)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹100</button>
+                <button onclick="setChip(500)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹500</button>
+                <button onclick="setChip(1000)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹1000</button>
+                <button onclick="setChip(5000)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹5000</button>
+            </div>
+            <input type="number" id="betAmount" value="100" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-center font-bold text-amber-400 focus:outline-none focus:border-amber-500">
+            
+            <div class="grid grid-cols-2 gap-4 pt-2">
+                <button onclick="placeBet('HEADS')" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-4 rounded-xl shadow-lg transition transform active:scale-95">BET HEADS</button>
+                <button onclick="placeBet('TAILS')" class="bg-gradient-to-r from-yellow-600 to-amber-700 hover:from-yellow-500 hover:to-amber-600 text-slate-100 font-black py-4 rounded-xl shadow-lg transition transform active:scale-95">BET TAILS</button>
+            </div>
+        </div>
+    </main>
 
     <!-- Auth Modal -->
-    <div id="authModal" class="modal" style="display: flex;">
-        <div class="modal-content">
-            <h2>Welcome to Coin3D</h2>
-            <p style="color:#94a3b8; margin-bottom: 15px; font-size: 0.9rem;">Login or Create Account instantly.</p>
-            <p id="authMsg" style="color:var(--gold); font-size:0.9rem; margin-bottom: 10px;">Connecting to server...</p>
-            <input type="text" id="loginUsername" placeholder="Username (e.g. Player1)">
-            <input type="password" id="loginPassword" placeholder="Password">
-            <button class="btn btn-green" style="width: 100%; margin-bottom: 10px;" onclick="handleDirectAuth(false)">Login</button>
-            <button class="btn btn-gold" style="width: 100%;" onclick="handleDirectAuth(true)">Create Account</button>
+    <div id="authModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4">
+            <h2 class="text-xl font-bold text-center">Account Access</h2>
+            <input id="loginUsername" type="text" placeholder="Username" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <input id="loginPassword" type="password" placeholder="Password" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="handleDirectAuth(false)" class="bg-amber-500 text-slate-950 font-bold py-2 rounded-lg">Login</button>
+                <button onclick="handleDirectAuth(true)" class="bg-slate-800 hover:bg-slate-700 font-bold py-2 rounded-lg">Sign Up</button>
+            </div>
+            <p id="authMsg" class="text-xs text-center text-red-400"></p>
         </div>
     </div>
 
     <!-- Deposit Modal -->
-    <div id="depositModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal('depositModal')">&times;</span>
-            <h2>Deposit Funds</h2>
-            <input type="number" id="depAmount" placeholder="Amount (Min ₹100)" oninput="updateQrCode()">
-            <img id="depositQrImage" class="qr-code" src="" alt="UPI QR">
-            <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 10px;">Scan or Tap to pay, then enter UTR below.</p>
-            <input type="text" id="depTxnId" placeholder="12-Digit UTR / Ref No.">
-            <button class="btn btn-green" style="width: 100%;" onclick="submitDeposit()">Submit Deposit</button>
+    <div id="depositModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4 text-center">
+            <h2 class="text-xl font-bold">Deposit Funds</h2>
+            <div id="qrcode" class="flex justify-center p-2 bg-white rounded-lg w-48 h-48 mx-auto"></div>
+            <p id="upiIdDisplay" class="text-xs text-amber-400 font-mono"></p>
+            <input id="depAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <input id="depTxn" type="text" placeholder="UTR / Transaction ID" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <button onclick="submitDeposit()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-lg font-bold">Submit Deposit</button>
+            <button onclick="closeModal('depositModal')" class="text-xs text-slate-500">Cancel</button>
         </div>
     </div>
 
-    <!-- Withdraw Modal -->
-    <div id="withdrawModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal('withdrawModal')">&times;</span>
-            <h2>Withdraw Funds</h2>
-            <input type="number" id="wdrAmount" placeholder="Amount (Min ₹300)">
-            <input type="text" id="wdrUpi" placeholder="Your UPI ID">
-            <button class="btn btn-red" style="width: 100%; margin-bottom: 15px;" onclick="submitWithdrawal()">Request Withdraw</button>
-            <h4 style="text-align: left; color: var(--gold); border-bottom: 1px solid #334155; padding-bottom: 5px;">History</h4>
-            <div id="userWithdrawalHistory" style="max-height: 150px; overflow-y: auto; text-align: left; margin-top: 10px; font-size: 0.85rem;"></div>
+    <!-- Withdrawal Modal -->
+    <div id="withdrawModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4 text-center">
+            <h2 class="text-xl font-bold">Withdraw Funds</h2>
+            <input id="wdAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <input id="wdUpi" type="text" placeholder="Your UPI ID" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <button onclick="submitWithdrawal()" class="w-full bg-amber-500 text-slate-950 py-3 rounded-lg font-bold">Request Cashout</button>
+            <button onclick="closeModal('withdrawModal')" class="text-xs text-slate-500">Cancel</button>
         </div>
     </div>
 
-    <!-- Admin Panel Modal -->
-    <div id="adminAuthModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeModal('adminAuthModal')">&times;</span>
-            <h2 style="color:var(--lose)">Admin Access</h2>
-            <input type="password" id="adminPassInput" placeholder="Secret Key">
-            <button class="btn btn-red" style="width: 100%;" onclick="verifyAdminPassword()">Unlock</button>
-            <p id="adminAuthMsg" style="margin-top:10px; font-size:0.9rem;"></p>
+    <!-- Hidden Admin Panel Modal -->
+    <div id="adminModal" class="hidden fixed inset-0 bg-black/90 z-50 p-4 overflow-y-auto">
+        <div id="adminAuthSection" class="max-w-sm mx-auto my-20 bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4">
+            <h2 class="text-xl font-bold text-center text-red-500">Admin Authentication</h2>
+            <input id="adminPass" type="password" placeholder="Admin Secret Password" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
+            <button onclick="authenticateAdmin()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold">Access Panel</button>
         </div>
-    </div>
 
-    <div id="adminModal" class="modal">
-        <div class="modal-content" style="max-width: 600px; max-height: 90vh; overflow-y: auto; text-align: left;">
-            <span class="close" onclick="closeModal('adminModal')">&times;</span>
-            <h2 style="color:var(--gold); border-bottom: 1px solid #334155; padding-bottom:10px;">God Mode Dashboard</h2>
-            
-            <div style="display:flex; justify-content:space-between; margin:15px 0; background:#0f172a; padding:10px; border-radius:8px;">
-                <div>House Profit: <br><strong id="adminProfit" style="color:var(--win); font-size:1.2rem;">₹0</strong></div>
-                <div>Volume: <br><strong id="adminVolume" style="color:var(--gold); font-size:1.2rem;">₹0</strong></div>
+        <div id="adminDashboard" class="hidden max-w-4xl mx-auto space-y-6">
+            <div class="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
+                <h1 class="text-2xl font-bold text-amber-400">House Control Center</h1>
+                <button onclick="closeModal('adminModal')" class="bg-slate-800 px-4 py-2 rounded-lg">Close</button>
             </div>
 
-            <h4>Force Outcome</h4>
-            <div class="btn-group" style="margin: 10px 0 20px;">
-                <button class="btn" style="background:#334155" onclick="setAdminMode('AUTO')">AUTO</button>
-                <button class="btn" style="background:#b45309" onclick="setAdminMode('HEADS')">HEADS</button>
-                <button class="btn" style="background:#1e293b; border: 1px solid var(--gold)" onclick="setAdminMode('TAILS')">TAILS</button>
+            <!-- Stats & Smart Edge Controls -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <p class="text-xs text-slate-400">Net House Profit</p>
+                    <p id="admProfit" class="text-2xl font-bold text-emerald-400">₹0</p>
+                </div>
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <p class="text-xs text-slate-400">Total Volume</p>
+                    <p id="admVolume" class="text-2xl font-bold text-amber-400">₹0</p>
+                </div>
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
+                    <p class="text-xs text-slate-400">Smart Engine Mode</p>
+                    <select id="admOutcomeSelect" onchange="changeOutcomeMode(this.value)" class="w-full bg-slate-950 border border-slate-800 mt-1 p-2 rounded text-amber-400 font-bold">
+                        <option value="AUTO">SMART AUTO (House Advantage)</option>
+                        <option value="FORCE_HEADS">FORCE HEADS</option>
+                        <option value="FORCE_TAILS">FORCE TAILS</option>
+                    </select>
+                </div>
             </div>
 
-            <h4>Live Receiver UPI</h4>
-            <div style="display:flex; gap:10px; margin: 10px 0 20px;">
-                <input type="text" id="newUpiInput" placeholder="newupi@bank" style="margin:0;">
-                <button class="btn btn-gold" onclick="updateAdminUpi()">Update Global QR</button>
+            <!-- Global Settings -->
+            <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-center space-x-4">
+                <input id="admUpiInput" type="text" placeholder="Active Receiver UPI" class="flex-1 bg-slate-950 border border-slate-800 p-2 rounded text-white">
+                <button onclick="saveAdminUpi()" class="bg-amber-500 text-slate-950 px-4 py-2 rounded-lg font-bold">Update Receiver UPI</button>
             </div>
 
-            <h4>Pending Deposits</h4>
-            <div id="adminDepositsContainer" style="background:#0f172a; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.85rem; max-height: 150px; overflow-y:auto;"></div>
+            <!-- Users & Pending Requests -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <h3 class="font-bold border-b border-slate-800 pb-2">Pending Deposits</h3>
+                    <div id="admDepositsList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+                </div>
+                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <h3 class="font-bold border-b border-slate-800 pb-2">Pending Withdrawals</h3>
+                    <div id="admWithdrawalsList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+                </div>
+            </div>
 
-            <h4>Pending Withdrawals</h4>
-            <div id="adminWithdrawalsContainer" style="background:#0f172a; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.85rem; max-height: 150px; overflow-y:auto;"></div>
-
-            <h4>Live Users</h4>
-            <div id="adminUsersContainer" style="background:#0f172a; padding:10px; border-radius:8px; font-size:0.85rem; max-height: 200px; overflow-y:auto;"></div>
-        </div>
-    </div>
-
-    <!-- Notification Overlays -->
-    <div id="winOverlay"><div class="win-text" id="winAmountText">+₹0</div></div>
-    <div id="notifyOverlay" class="modal" style="background: rgba(0,0,0,0.9); z-index: 300;">
-        <div class="modal-content">
-            <h2 id="notifyTitle" style="color:var(--win)"></h2>
-            <p id="notifyMessage" style="margin: 15px 0; font-size: 1.2rem;"></p>
-            <button class="btn btn-gold" onclick="closeModal('notifyOverlay')">OK</button>
+            <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
+                <h3 class="font-bold border-b border-slate-800 pb-2">User Directory & Wallets</h3>
+                <div id="admUsersList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+            </div>
         </div>
     </div>
 
