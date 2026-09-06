@@ -2,97 +2,211 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Real Silver 3D Coin Flip</title>
-    <link rel="stylesheet" href="style.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Coin Flip Casino</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a; --bg-card: #1e293b; --gold: #eab308;
+            --gold-glow: rgba(234, 179, 8, 0.4); --text-light: #f8fafc;
+            --win: #22c55e; --lose: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-light); overflow-x: hidden; }
+        
+        /* Navbar */
+        .navbar { display: flex; justify-content: space-between; padding: 15px 20px; background: var(--bg-card); border-bottom: 2px solid var(--gold); }
+        .logo { font-size: 1.5rem; font-weight: 900; color: var(--gold); cursor: pointer; user-select: none; }
+        .wallet { display: flex; gap: 10px; align-items: center; }
+        .balance { font-size: 1.2rem; font-weight: bold; background: rgba(255,255,255,0.1); padding: 5px 15px; border-radius: 20px; }
+        .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: #fff; text-transform: uppercase; }
+        .btn-gold { background: var(--gold); color: #000; }
+        .btn-green { background: var(--win); }
+        .btn-red { background: var(--lose); }
+
+        /* Game Arena */
+        .arena { text-align: center; padding: 30px 20px; }
+        .timer-box { font-size: 2rem; font-weight: 900; color: var(--gold); margin-bottom: 5px; text-shadow: 0 0 10px var(--gold-glow); }
+        .round-info { font-size: 0.9rem; color: #94a3b8; margin-bottom: 30px; }
+
+        /* 3D Coin */
+        .coin-container { perspective: 1000px; width: 150px; height: 150px; margin: 0 auto 30px; }
+        .coin { width: 100%; height: 100%; position: relative; transform-style: preserve-3d; transition: transform 1.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .face { position: absolute; width: 100%; height: 100%; border-radius: 50%; backface-visibility: hidden; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; font-weight: 900; box-shadow: inset 0 0 20px rgba(0,0,0,0.5), 0 0 30px var(--gold-glow); border: 4px solid var(--gold); }
+        .heads { background: radial-gradient(#fbbf24, #b45309); color: #000; }
+        .tails { background: radial-gradient(#94a3b8, #334155); color: #fff; transform: rotateY(180deg); }
+
+        /* Controls */
+        .bet-controls { display: flex; flex-direction: column; gap: 15px; max-width: 400px; margin: 0 auto; }
+        .bet-input { width: 100%; padding: 12px; border-radius: 8px; border: 2px solid #334155; background: var(--bg-dark); color: #fff; font-size: 1.2rem; text-align: center; outline: none; }
+        .bet-input:focus { border-color: var(--gold); }
+        .btn-group { display: flex; gap: 10px; }
+        .btn-group .btn { flex: 1; padding: 15px; font-size: 1.1rem; }
+
+        /* History & Feed */
+        .history-strip { display: flex; gap: 5px; justify-content: center; margin: 20px 0; overflow-x: auto; padding: 10px; }
+        .chip { width: 35px; height: 35px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 0.8rem; border: 2px solid var(--gold); }
+        .chip.heads { background: #b45309; color: #fff; }
+        .chip.tails { background: #334155; color: #fff; }
+        .marquee { background: var(--bg-card); padding: 10px; font-size: 0.9rem; overflow: hidden; white-space: nowrap; border-top: 1px solid #334155; position: fixed; bottom: 0; width: 100%; }
+        .feed-item { display: inline-block; margin-right: 30px; color: var(--gold); }
+
+        /* Modals */
+        .modal { display: none; position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(5px); }
+        .modal-content { background: var(--bg-card); padding: 25px; border-radius: 15px; width: 90%; max-width: 400px; border: 1px solid #334155; text-align: center; }
+        .modal input { width: 100%; margin-bottom: 15px; padding: 12px; background: var(--bg-dark); border: 1px solid #334155; color: #fff; border-radius: 8px; }
+        .qr-code { width: 200px; height: 200px; margin: 15px auto; background: #fff; padding: 10px; border-radius: 10px; }
+        .close { color: #94a3b8; float: right; cursor: pointer; font-size: 1.5rem; margin-top: -10px; }
+        
+        /* Win Overlay */
+        #winOverlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 200; align-items: center; justify-content: center; background: radial-gradient(circle, rgba(34,197,94,0.2) 0%, transparent 70%); }
+        .win-text { font-size: 4rem; color: var(--win); font-weight: 900; text-shadow: 0 0 20px #000; animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; transform: scale(0); }
+        @keyframes popIn { to { transform: scale(1); } }
+    </style>
 </head>
 <body>
 
-    <!-- Header Section -->
-    <header class="glass-panel">
-        <div class="user-info">
-            <span class="balance-badge">Balance: ₹<span id="userBalance">1000</span></span>
+    <nav class="navbar">
+        <div class="logo" id="brandBtn">COIN3D</div>
+        <div class="wallet">
+            <span class="balance" id="walletBalance">₹0</span>
+            <button class="btn btn-green" id="openDepositBtn">Dep</button>
+            <button class="btn btn-red" id="openWithdrawBtn">Wdr</button>
         </div>
-        <div class="header-buttons">
-            <button class="action-btn" onclick="openModal('depositModal')">Deposit History</button>
-            <button class="action-btn" onclick="openModal('withdrawModal')">Withdraw History</button>
-        </div>
-    </header>
+    </nav>
 
-    <!-- 3D Coin Arena -->
-    <div class="coin-arena">
-        <div class="coin-bounce" id="coinBounce">
-            <div class="coin-container" id="coin">
-                <div class="coin-face heads">HEADS</div>
-                <div class="coin-face tails">TAILS</div>
+    <div class="arena">
+        <div class="timer-box" id="countdownTimer">30s</div>
+        <div class="round-info">
+            <span id="roundIdText">#Loading</span> | <span id="istTimeText">Syncing IST...</span>
+        </div>
+
+        <div class="coin-container">
+            <div class="coin" id="coin3d">
+                <div class="face heads">HEADS</div>
+                <div class="face tails">TAILS</div>
             </div>
-        </div>
-        <div class="coin-shadow" id="coinShadow"></div>
-    </div>
-
-    <!-- Last 10 Results History -->
-    <div class="history-container glass-panel">
-        <div class="history-title">LAST 10 RESULTS</div>
-        <div id="historyList" class="history-list">
-            <span class="history-empty">No history yet</span>
-        </div>
-    </div>
-
-    <!-- Betting Controls -->
-    <div class="betting-section glass-panel">
-        <div class="chips-container">
-            <button class="chip-btn" onclick="selectChip(10)">₹10</button>
-            <button class="chip-btn" onclick="selectChip(50)">₹50</button>
-            <button class="chip-btn" onclick="selectChip(100)">₹100</button>
-            <button class="chip-btn" onclick="selectChip(500)">₹500</button>
         </div>
         
-        <div class="selected-amount">Selected Bet: ₹<span id="currentBet">10</span></div>
+        <h3 id="resultText" style="margin-bottom: 20px; height: 20px; color: var(--gold);"></h3>
 
-        <div class="action-buttons">
-            <button class="btn-heads-bet" onclick="placeBet('HEADS')">BET ON HEADS</button>
-            <button class="btn-tails-bet" onclick="placeBet('TAILS')">BET ON TAILS</button>
+        <div class="bet-controls">
+            <input type="number" id="betAmountInput" class="bet-input" placeholder="Enter Bet Amount (₹)" min="10">
+            <div class="btn-group">
+                <button class="btn btn-gold" onclick="setBetAmount(100)">+100</button>
+                <button class="btn btn-gold" onclick="setBetAmount(500)">+500</button>
+                <button class="btn btn-gold" onclick="setBetAmount(1000)">+1000</button>
+            </div>
+            <div class="btn-group" style="margin-top: 10px;">
+                <button class="btn" style="background:#b45309" onclick="placeBet('HEADS')">BET HEADS (2x)</button>
+                <button class="btn" style="background:#334155" onclick="placeBet('TAILS')">BET TAILS (2x)</button>
+            </div>
+            <p id="statusMsg" style="font-size: 0.9rem; font-weight: bold; margin-top: 10px;"></p>
         </div>
     </div>
 
-    <!-- Deposit History Modal -->
+    <div class="history-strip" id="historyChips"></div>
+
+    <div class="marquee">
+        <marquee behavior="scroll" direction="left" id="betsFeed">
+            <span class="feed-item">Waiting for bets...</span>
+        </marquee>
+    </div>
+
+    <!-- Auth Modal -->
+    <div id="authModal" class="modal" style="display: flex;">
+        <div class="modal-content">
+            <h2>Welcome to Coin3D</h2>
+            <p style="color:#94a3b8; margin-bottom: 15px; font-size: 0.9rem;">Login or Create Account instantly.</p>
+            <p id="authMsg" style="color:var(--gold); font-size:0.9rem; margin-bottom: 10px;">Connecting to server...</p>
+            <input type="text" id="loginUsername" placeholder="Username (e.g. Player1)">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button class="btn btn-green" style="width: 100%; margin-bottom: 10px;" onclick="handleDirectAuth(false)">Login</button>
+            <button class="btn btn-gold" style="width: 100%;" onclick="handleDirectAuth(true)">Create Account</button>
+        </div>
+    </div>
+
+    <!-- Deposit Modal -->
     <div id="depositModal" class="modal">
-        <div class="modal-content glass-panel">
-            <div class="modal-header">
-                <h2>Deposit History</h2>
-                <button class="close-btn" onclick="closeModal('depositModal')">&times;</button>
-            </div>
-            <table class="history-table">
-                <thead>
-                    <tr><th>Date</th><th>Amount</th><th>Status</th></tr>
-                </thead>
-                <tbody id="depositTableBody">
-                    <!-- Data JS se aayega -->
-                </tbody>
-            </table>
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('depositModal')">&times;</span>
+            <h2>Deposit Funds</h2>
+            <input type="number" id="depAmount" placeholder="Amount (Min ₹100)" oninput="updateQrCode()">
+            <img id="depositQrImage" class="qr-code" src="" alt="UPI QR">
+            <p style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 10px;">Scan or Tap to pay, then enter UTR below.</p>
+            <input type="text" id="depTxnId" placeholder="12-Digit UTR / Ref No.">
+            <button class="btn btn-green" style="width: 100%;" onclick="submitDeposit()">Submit Deposit</button>
         </div>
     </div>
 
-    <!-- Withdraw History Modal -->
+    <!-- Withdraw Modal -->
     <div id="withdrawModal" class="modal">
-        <div class="modal-content glass-panel">
-            <div class="modal-header">
-                <h2>Withdrawal History</h2>
-                <button class="close-btn" onclick="closeModal('withdrawModal')">&times;</button>
-            </div>
-            <table class="history-table">
-                <thead>
-                    <tr><th>Date</th><th>Amount</th><th>Status</th></tr>
-                </thead>
-                <tbody id="withdrawTableBody">
-                    <!-- Data JS se aayega -->
-                </tbody>
-            </table>
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('withdrawModal')">&times;</span>
+            <h2>Withdraw Funds</h2>
+            <input type="number" id="wdrAmount" placeholder="Amount (Min ₹300)">
+            <input type="text" id="wdrUpi" placeholder="Your UPI ID">
+            <button class="btn btn-red" style="width: 100%; margin-bottom: 15px;" onclick="submitWithdrawal()">Request Withdraw</button>
+            <h4 style="text-align: left; color: var(--gold); border-bottom: 1px solid #334155; padding-bottom: 5px;">History</h4>
+            <div id="userWithdrawalHistory" style="max-height: 150px; overflow-y: auto; text-align: left; margin-top: 10px; font-size: 0.85rem;"></div>
         </div>
     </div>
 
-    <!-- Socket.io aur custom JS -->
-    <script src="/socket.io/socket.io.js"></script>
+    <!-- Admin Panel Modal -->
+    <div id="adminAuthModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('adminAuthModal')">&times;</span>
+            <h2 style="color:var(--lose)">Admin Access</h2>
+            <input type="password" id="adminPassInput" placeholder="Secret Key">
+            <button class="btn btn-red" style="width: 100%;" onclick="verifyAdminPassword()">Unlock</button>
+            <p id="adminAuthMsg" style="margin-top:10px; font-size:0.9rem;"></p>
+        </div>
+    </div>
+
+    <div id="adminModal" class="modal">
+        <div class="modal-content" style="max-width: 600px; max-height: 90vh; overflow-y: auto; text-align: left;">
+            <span class="close" onclick="closeModal('adminModal')">&times;</span>
+            <h2 style="color:var(--gold); border-bottom: 1px solid #334155; padding-bottom:10px;">God Mode Dashboard</h2>
+            
+            <div style="display:flex; justify-content:space-between; margin:15px 0; background:#0f172a; padding:10px; border-radius:8px;">
+                <div>House Profit: <br><strong id="adminProfit" style="color:var(--win); font-size:1.2rem;">₹0</strong></div>
+                <div>Volume: <br><strong id="adminVolume" style="color:var(--gold); font-size:1.2rem;">₹0</strong></div>
+            </div>
+
+            <h4>Force Outcome</h4>
+            <div class="btn-group" style="margin: 10px 0 20px;">
+                <button class="btn" style="background:#334155" onclick="setAdminMode('AUTO')">AUTO</button>
+                <button class="btn" style="background:#b45309" onclick="setAdminMode('HEADS')">HEADS</button>
+                <button class="btn" style="background:#1e293b; border: 1px solid var(--gold)" onclick="setAdminMode('TAILS')">TAILS</button>
+            </div>
+
+            <h4>Live Receiver UPI</h4>
+            <div style="display:flex; gap:10px; margin: 10px 0 20px;">
+                <input type="text" id="newUpiInput" placeholder="newupi@bank" style="margin:0;">
+                <button class="btn btn-gold" onclick="updateAdminUpi()">Update Global QR</button>
+            </div>
+
+            <h4>Pending Deposits</h4>
+            <div id="adminDepositsContainer" style="background:#0f172a; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.85rem; max-height: 150px; overflow-y:auto;"></div>
+
+            <h4>Pending Withdrawals</h4>
+            <div id="adminWithdrawalsContainer" style="background:#0f172a; padding:10px; border-radius:8px; margin-bottom:20px; font-size:0.85rem; max-height: 150px; overflow-y:auto;"></div>
+
+            <h4>Live Users</h4>
+            <div id="adminUsersContainer" style="background:#0f172a; padding:10px; border-radius:8px; font-size:0.85rem; max-height: 200px; overflow-y:auto;"></div>
+        </div>
+    </div>
+
+    <!-- Notification Overlays -->
+    <div id="winOverlay"><div class="win-text" id="winAmountText">+₹0</div></div>
+    <div id="notifyOverlay" class="modal" style="background: rgba(0,0,0,0.9); z-index: 300;">
+        <div class="modal-content">
+            <h2 id="notifyTitle" style="color:var(--win)"></h2>
+            <p id="notifyMessage" style="margin: 15px 0; font-size: 1.2rem;"></p>
+            <button class="btn btn-gold" onclick="closeModal('notifyOverlay')">OK</button>
+        </div>
+    </div>
+
     <script src="app.js"></script>
 </body>
 </html>
