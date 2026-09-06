@@ -1,18 +1,26 @@
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const cors = require('cors');
 const path = require('path');
 
-// 1. Static files ko 'public' folder se serve karein
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// 1. 'public' folder se static files (index.html, app.js, style.css) serve karein
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 2. Browser request aane par public folder ki index.html send karein
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+const server = http.createServer(app);
+const io = new Server(server, {
+    cors: { origin: "*", methods: ["GET", "POST"] }
 });
-
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/coinflip_casino";
 mongoose.connect(MONGO_URI)
-    .then(() => console.log("MongoDB Connected Successfully"))
+    .then(() => console.log("MongoDB Database Connected Successfully"))
     .catch(err => console.error("MongoDB Connection Error:", err));
 
 // Database Schemas
@@ -59,14 +67,18 @@ let history = [];
 
 // Initialize Default Settings
 async function initSettings() {
-    const upi = await Setting.findOne({ key: 'admin_upi' });
-    if (!upi) {
-        await Setting.create({ key: 'admin_upi', value: 'paytmqr@upi' });
+    try {
+        const upi = await Setting.findOne({ key: 'admin_upi' });
+        if (!upi) {
+            await Setting.create({ key: 'admin_upi', value: 'paytmqr@upi' });
+        }
+    } catch (err) {
+        console.error("Settings initialization error:", err);
     }
 }
 initSettings();
 
-// Core Game Loop
+// Core Game Loop (30 Seconds Timer)
 setInterval(async () => {
     gameTimer--;
 
@@ -74,7 +86,7 @@ setInterval(async () => {
     const headsTotal = currentBets.filter(b => b.side === 'HEADS').reduce((a, b) => a + b.amount, 0);
     const tailsTotal = currentBets.filter(b => b.side === 'TAILS').reduce((a, b) => a + b.amount, 0);
 
-    // Auto-calculate forced outcome for AUTO mode (Side with LESS money wins)
+    // Smart AUTO Engine: Jis side kam paisa hai usko winner banao
     let projectedOutcome = 'HEADS';
     if (headsTotal < tailsTotal) {
         projectedOutcome = 'HEADS';
@@ -101,7 +113,7 @@ setInterval(async () => {
                 roundPayout += winAmount;
                 winners.push({ username: bet.username, amount: winAmount });
                 
-                // Atomically update user balance
+                // Atomically update user balance in MongoDB
                 await User.findOneAndUpdate(
                     { username: bet.username },
                     { $inc: { balance: winAmount } }
@@ -135,18 +147,18 @@ setInterval(async () => {
     });
 }, 1000);
 
-// Socket Handlers
+// Realtime Socket Handlers
 io.on('connection', (socket) => {
 
     socket.on('user_login', async (data, callback) => {
         try {
             let user = await User.findOne({ username: data.username });
             if (data.isSignUp) {
-                if (user) return callback({ success: false, msg: "User exists!" });
+                if (user) return callback({ success: false, msg: "User already exists!" });
                 user = await User.create({ username: data.username, password: data.password, balance: 100 });
             } else {
                 if (!user || user.password !== data.password) {
-                    return callback({ success: false, msg: "Invalid credentials!" });
+                    return callback({ success: false, msg: "Invalid username or password!" });
                 }
             }
             user.isOnline = true;
@@ -161,13 +173,13 @@ io.on('connection', (socket) => {
                 adminUpi: upiSetting ? upiSetting.value : 'paytmqr@upi'
             });
         } catch (e) {
-            callback({ success: false, msg: "Server error" });
+            callback({ success: false, msg: "Server Error during login" });
         }
     });
 
     socket.on('place_bet', async (data, callback) => {
         if (gameTimer <= 3) return callback({ success: false, msg: "Betting locked for spin!" });
-        if (!socket.username) return callback({ success: false, msg: "Please login!" });
+        if (!socket.username) return callback({ success: false, msg: "Please login first!" });
 
         try {
             const user = await User.findOne({ username: socket.username });
@@ -175,7 +187,7 @@ io.on('connection', (socket) => {
                 return callback({ success: false, msg: "Insufficient Balance!" });
             }
 
-            // Deduct balance atomically
+            // Deduct balance atomically in MongoDB
             user.balance -= data.amount;
             await user.save();
 
@@ -213,7 +225,7 @@ io.on('connection', (socket) => {
                 return callback({ success: false, msg: "Insufficient balance!" });
             }
 
-            // Deduct balance upfront atomically
+            // Deduct balance upfront
             user.balance -= data.amount;
             await user.save();
 
@@ -229,12 +241,12 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Admin Handlers
+    // Admin Panel Handlers
     socket.on('admin_auth', (password, callback) => {
         if (password === 'admin123') {
             callback({ success: true });
         } else {
-            callback({ success: false, msg: "Wrong Admin Password" });
+            callback({ success: false, msg: "Incorrect Admin Password" });
         }
     });
 
@@ -278,7 +290,7 @@ io.on('connection', (socket) => {
             wd.status = action;
             await wd.save();
             if (action === 'REJECTED') {
-                // Refund money on rejection
+                // Refund money on withdrawal rejection
                 await User.findOneAndUpdate({ username: wd.username }, { $inc: { balance: wd.amount } });
             }
             io.emit('admin_data_refresh');
@@ -302,5 +314,11 @@ io.on('connection', (socket) => {
     });
 });
 
+// 2. Fallback Route: Kisi bhi route par jaoge toh public/index.html send karega
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Server Listen
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => console.log(`Casino Server running on port ${PORT}`));
