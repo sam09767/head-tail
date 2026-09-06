@@ -7,171 +7,189 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <style>
-        .coin-arena { perspective: 1000px; }
-        .coin {
-            width: 160px;
-            height: 160px;
-            position: relative;
-            transform-style: preserve-3d;
-            transition: transform 3s cubic-bezier(0.15, 0.85, 0.35, 1.2);
-        }
-        .coin-face {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            border-radius: 50%;
-            backface-visibility: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.75rem;
-            font-weight: 800;
-            border: 4px solid #f59e0b;
-            box-shadow: 0 0 25px rgba(245, 158, 11, 0.4);
-        }
-        .heads { background: linear-gradient(135deg, #fbbf24, #d97706); color: #1e293b; }
-        .tails { background: linear-gradient(135deg, #f59e0b, #b45309); color: #ffffff; transform: rotateY(180deg); }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col">
 
     <!-- Top Navigation Header -->
-    <header class="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-40 flex justify-between items-center">
+    <header class="glass-panel border-b border-slate-800 p-4 sticky top-0 z-40 flex justify-between items-center w-full max-w-5xl mx-auto mt-4 rounded-2xl">
         <div class="flex items-center space-x-3 cursor-pointer select-none" id="brandLogo">
             <div class="w-10 h-10 bg-amber-500 rounded-full flex items-center justify-center text-slate-950 font-black text-xl shadow-lg shadow-amber-500/20">C</div>
             <span class="text-xl font-extrabold tracking-wider bg-gradient-to-r from-amber-400 to-yellow-200 bg-clip-text text-transparent">COIN3D</span>
         </div>
         
-        <div id="userState" class="hidden flex items-center space-x-4">
-            <div class="bg-slate-800 border border-slate-700 px-4 py-1.5 rounded-full flex items-center space-x-2">
-                <span class="text-xs text-slate-400">Balance:</span>
-                <span id="walletBalance" class="text-amber-400 font-bold">₹0</span>
+        <!-- Last Rounds History -->
+        <div class="hidden md:flex flex-col items-center">
+            <span class="text-xs text-slate-400 font-bold mb-1">LAST ROUNDS</span>
+            <div id="history" class="flex space-x-2">
+                <!-- History badges inject hongi JS se -->
             </div>
-            <button onclick="openModal('depositModal')" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Deposit</button>
-            <button onclick="openModal('withdrawModal')" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Withdraw</button>
         </div>
 
-        <button id="authBtn" onclick="openModal('authModal')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-lg transition">Login / Register</button>
+        <div id="userState" class="hidden flex items-center space-x-3">
+            <div class="bg-slate-800 border border-slate-700 px-4 py-1.5 rounded-full flex items-center space-x-2">
+                <span class="text-xs text-slate-400">Bal:</span>
+                <span id="walletBalance" class="balance-badge">₹0</span>
+            </div>
+            <button onclick="openModal('depositModal')" class="bg-emerald-600 hover:bg-emerald-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition shadow-lg">Deposit</button>
+            <button onclick="openModal('withdrawModal')" class="bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg text-sm font-semibold transition">Withdraw</button>
+            <button onclick="fetchUserHistory()" class="bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded-lg text-sm font-semibold transition">History</button>
+        </div>
+
+        <button id="authBtn" onclick="openModal('authModal')" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2 rounded-lg transition shadow-lg shadow-amber-500/20">Login / Register</button>
     </header>
 
     <!-- Main Game Canvas -->
-    <main class="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col justify-between space-y-6">
+    <main class="flex-1 max-w-4xl w-full mx-auto p-4 flex flex-col justify-center items-center space-y-8 mt-4">
         
         <!-- Game Header & Timer -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center space-y-4 shadow-xl">
-            <div class="flex justify-between items-center text-sm text-slate-400">
-                <span>Next Spin In</span>
-                <span id="history" class="flex space-x-1"></span>
-            </div>
-            <div id="timerDisplay" class="text-5xl font-black text-amber-400">00:30</div>
-            <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                <div id="timerBar" class="bg-amber-400 h-full w-full transition-all duration-1000"></div>
+        <div class="glass-panel w-full p-6 text-center space-y-4">
+            <p class="text-sm text-slate-400 font-bold tracking-widest uppercase">Next Spin In</p>
+            <div id="timerDisplay" class="text-6xl font-black text-amber-400 drop-shadow-md">00:30</div>
+            <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden shadow-inner">
+                <div id="timerBar" class="bg-gradient-to-r from-amber-500 to-yellow-300 h-full w-full transition-all duration-1000"></div>
             </div>
         </div>
 
         <!-- 3D Coin Arena -->
-        <div class="coin-arena flex justify-center items-center py-8">
-            <div id="coin" class="coin">
+        <div class="coin-arena">
+            <div id="coin" class="coin-container">
                 <div class="coin-face heads">HEADS</div>
                 <div class="coin-face tails">TAILS</div>
             </div>
+            <div class="coin-shadow"></div>
         </div>
 
-        <!-- Live Round Totals -->
-        <div class="grid grid-cols-2 gap-4">
-            <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-center">
-                <p class="text-xs text-slate-400">HEADS BETS</p>
-                <p id="headsTotal" class="text-xl font-bold text-amber-400">₹0</p>
+        <!-- Bet Controls (Total Bets hidden for normal users) -->
+        <div class="betting-section glass-panel w-full">
+            <div class="chips-container">
+                <button onclick="setChip(100)" class="chip-btn">₹100</button>
+                <button onclick="setChip(500)" class="chip-btn">₹500</button>
+                <button onclick="setChip(1000)" class="chip-btn">₹1000</button>
+                <button onclick="setChip(5000)" class="chip-btn">₹5000</button>
             </div>
-            <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-xl text-center">
-                <p class="text-xs text-slate-400">TAILS BETS</p>
-                <p id="tailsTotal" class="text-xl font-bold text-amber-500">₹0</p>
+            <div class="selected-amount">
+                <input type="number" id="betAmount" value="100" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-center font-bold text-amber-400 focus:outline-none focus:border-amber-500 text-xl">
             </div>
-        </div>
-
-        <!-- Bet Controls -->
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-4 shadow-xl">
-            <div class="flex justify-between space-x-2">
-                <button onclick="setChip(100)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹100</button>
-                <button onclick="setChip(500)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹500</button>
-                <button onclick="setChip(1000)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹1000</button>
-                <button onclick="setChip(5000)" class="chip-btn flex-1 bg-slate-800 hover:bg-slate-700 py-2 rounded-lg font-bold border border-slate-700">₹5000</button>
-            </div>
-            <input type="number" id="betAmount" value="100" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-center font-bold text-amber-400 focus:outline-none focus:border-amber-500">
             
-            <div class="grid grid-cols-2 gap-4 pt-2">
-                <button onclick="placeBet('HEADS')" class="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black py-4 rounded-xl shadow-lg transition transform active:scale-95">BET HEADS</button>
-                <button onclick="placeBet('TAILS')" class="bg-gradient-to-r from-yellow-600 to-amber-700 hover:from-yellow-500 hover:to-amber-600 text-slate-100 font-black py-4 rounded-xl shadow-lg transition transform active:scale-95">BET TAILS</button>
+            <div class="action-buttons">
+                <button onclick="placeBet('HEADS')" class="btn-heads-bet shadow-lg shadow-amber-500/20 transition transform active:scale-95">BET HEADS</button>
+                <button onclick="placeBet('TAILS')" class="btn-tails-bet shadow-lg shadow-slate-500/20 transition transform active:scale-95">BET TAILS</button>
             </div>
         </div>
     </main>
 
+    <!-- Win/Loss Overlay Animation -->
+    <div id="resultOverlay" class="hidden fixed inset-0 z-[100] flex items-center justify-center pointer-events-none bg-black/40 backdrop-blur-sm transition-opacity duration-300">
+        <div id="resultBox" class="transform scale-0 transition-transform duration-500 text-center">
+            <h1 id="resultTitle" class="text-7xl font-black drop-shadow-2xl tracking-tight"></h1>
+            <p id="resultAmount" class="text-3xl font-bold mt-4"></p>
+        </div>
+    </div>
+
     <!-- Auth Modal -->
     <div id="authModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4">
-            <h2 class="text-xl font-bold text-center">Account Access</h2>
-            <input id="loginUsername" type="text" placeholder="Username" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <input id="loginPassword" type="password" placeholder="Password" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <div class="grid grid-cols-2 gap-2">
-                <button onclick="handleDirectAuth(false)" class="bg-amber-500 text-slate-950 font-bold py-2 rounded-lg">Login</button>
-                <button onclick="handleDirectAuth(true)" class="bg-slate-800 hover:bg-slate-700 font-bold py-2 rounded-lg">Sign Up</button>
+        <div class="glass-panel max-w-sm w-full p-6 space-y-4">
+            <h2 class="text-xl font-bold text-center text-amber-400">Account Access</h2>
+            <input id="loginUsername" type="text" placeholder="Username" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
+            <input id="loginPassword" type="password" placeholder="Password" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="handleDirectAuth(false)" class="bg-amber-500 text-slate-950 font-bold py-3 rounded-lg shadow-lg">Login</button>
+                <button onclick="handleDirectAuth(true)" class="bg-slate-800 hover:bg-slate-700 font-bold py-3 rounded-lg">Sign Up</button>
             </div>
             <p id="authMsg" class="text-xs text-center text-red-400"></p>
+            <button onclick="closeModal('authModal')" class="w-full text-sm text-slate-500 mt-2">Cancel</button>
         </div>
     </div>
 
     <!-- Deposit Modal -->
     <div id="depositModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4 text-center">
-            <h2 class="text-xl font-bold">Deposit Funds</h2>
-            <div id="qrcode" class="flex justify-center p-2 bg-white rounded-lg w-48 h-48 mx-auto"></div>
-            <p id="upiIdDisplay" class="text-xs text-amber-400 font-mono"></p>
-            <input id="depAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <input id="depTxn" type="text" placeholder="UTR / Transaction ID" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <button onclick="submitDeposit()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-lg font-bold">Submit Deposit</button>
-            <button onclick="closeModal('depositModal')" class="text-xs text-slate-500">Cancel</button>
+        <div class="glass-panel max-w-sm w-full p-6 space-y-4 text-center">
+            <h2 class="text-xl font-bold text-emerald-400">Deposit Funds</h2>
+            <div id="qrcode" class="flex justify-center p-3 bg-white rounded-xl w-52 h-52 mx-auto"></div>
+            <p id="upiIdDisplay" class="text-sm text-amber-400 font-mono bg-slate-950 p-2 rounded-lg"></p>
+            <input id="depAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white font-bold">
+            <input id="depTxn" type="text" placeholder="UTR / Transaction ID (12 Digits)" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
+            <button onclick="submitDeposit()" class="w-full bg-emerald-600 hover:bg-emerald-500 py-3 rounded-lg font-bold shadow-lg shadow-emerald-500/20">Submit Deposit</button>
+            <button onclick="closeModal('depositModal')" class="text-sm text-slate-400 hover:text-white">Close</button>
         </div>
     </div>
 
     <!-- Withdrawal Modal -->
     <div id="withdrawModal" class="hidden fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div class="bg-slate-900 border border-slate-800 max-w-sm w-full p-6 rounded-2xl space-y-4 text-center">
-            <h2 class="text-xl font-bold">Withdraw Funds</h2>
-            <input id="wdAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <input id="wdUpi" type="text" placeholder="Your UPI ID" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <button onclick="submitWithdrawal()" class="w-full bg-amber-500 text-slate-950 py-3 rounded-lg font-bold">Request Cashout</button>
-            <button onclick="closeModal('withdrawModal')" class="text-xs text-slate-500">Cancel</button>
+        <div class="glass-panel max-w-sm w-full p-6 space-y-4 text-center">
+            <h2 class="text-xl font-bold text-amber-400">Withdraw Funds</h2>
+            <input id="wdAmount" type="number" placeholder="Amount (₹)" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white font-bold">
+            <input id="wdUpi" type="text" placeholder="Your Receiving UPI ID" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
+            <button onclick="submitWithdrawal()" class="w-full bg-amber-500 text-slate-950 py-3 rounded-lg font-bold shadow-lg shadow-amber-500/20">Request Cashout</button>
+            <button onclick="closeModal('withdrawModal')" class="text-sm text-slate-400 hover:text-white">Close</button>
+        </div>
+    </div>
+
+    <!-- User Transaction History Modal -->
+    <div id="historyModal" class="modal">
+        <div class="modal-content glass-panel">
+            <div class="modal-header">
+                <h2 class="text-xl font-bold text-white">My Transactions</h2>
+                <button onclick="closeModal('historyModal')" class="close-btn">&times;</button>
+            </div>
+            <div class="space-y-4 max-h-[60vh] overflow-y-auto">
+                <div>
+                    <h3 class="font-bold text-emerald-400 mb-2">Deposits</h3>
+                    <table class="history-table w-full text-white">
+                        <tbody id="userDepositHistory"></tbody>
+                    </table>
+                </div>
+                <div class="mt-4">
+                    <h3 class="font-bold text-amber-400 mb-2">Withdrawals</h3>
+                    <table class="history-table w-full text-white">
+                        <tbody id="userWithdrawHistory"></tbody>
+                    </table>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Hidden Admin Panel Modal -->
-    <div id="adminModal" class="hidden fixed inset-0 bg-black/90 z-50 p-4 overflow-y-auto">
-        <div id="adminAuthSection" class="max-w-sm mx-auto my-20 bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-4">
+    <div id="adminModal" class="hidden fixed inset-0 bg-black/95 z-50 p-4 overflow-y-auto">
+        <div id="adminAuthSection" class="max-w-sm mx-auto my-20 glass-panel p-6 space-y-4">
             <h2 class="text-xl font-bold text-center text-red-500">Admin Authentication</h2>
-            <input id="adminPass" type="password" placeholder="Admin Secret Password" class="w-full bg-slate-950 border border-slate-800 p-3 rounded-lg text-white">
-            <button onclick="authenticateAdmin()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold">Access Panel</button>
+            <input id="adminPass" type="password" placeholder="Admin Secret Password" class="w-full bg-slate-950 border border-slate-700 p-3 rounded-lg text-white">
+            <button onclick="authenticateAdmin()" class="w-full bg-red-600 hover:bg-red-500 py-3 rounded-lg font-bold shadow-lg shadow-red-500/20">Access Panel</button>
+            <button onclick="closeModal('adminModal')" class="w-full text-sm text-slate-400 hover:text-white mt-2">Close</button>
         </div>
 
-        <div id="adminDashboard" class="hidden max-w-4xl mx-auto space-y-6">
-            <div class="flex justify-between items-center bg-slate-900 p-4 rounded-xl border border-slate-800">
+        <div id="adminDashboard" class="hidden max-w-5xl mx-auto space-y-6 pb-20">
+            <div class="flex justify-between items-center glass-panel p-4 mt-10">
                 <h1 class="text-2xl font-bold text-amber-400">House Control Center</h1>
-                <button onclick="closeModal('adminModal')" class="bg-slate-800 px-4 py-2 rounded-lg">Close</button>
+                <button onclick="closeModal('adminModal')" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg font-bold text-white transition">Close Panel</button>
+            </div>
+
+            <!-- LIVE TOTAL BETS (Only Visible to Admin) -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="glass-panel p-4 text-center border-l-4 border-amber-500">
+                    <p class="text-xs text-slate-400 font-bold mb-1">LIVE HEADS BETS</p>
+                    <p id="admHeadsTotal" class="text-3xl font-black text-amber-400">₹0</p>
+                </div>
+                <div class="glass-panel p-4 text-center border-l-4 border-slate-400">
+                    <p class="text-xs text-slate-400 font-bold mb-1">LIVE TAILS BETS</p>
+                    <p id="admTailsTotal" class="text-3xl font-black text-slate-300">₹0</p>
+                </div>
             </div>
 
             <!-- Stats & Smart Edge Controls -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs text-slate-400">Net House Profit</p>
-                    <p id="admProfit" class="text-2xl font-bold text-emerald-400">₹0</p>
+                <div class="glass-panel p-4">
+                    <p class="text-xs text-slate-400 font-bold">Net House Profit</p>
+                    <p id="admProfit" class="text-2xl font-bold text-emerald-400 mt-1">₹0</p>
                 </div>
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs text-slate-400">Total Volume</p>
-                    <p id="admVolume" class="text-2xl font-bold text-amber-400">₹0</p>
+                <div class="glass-panel p-4">
+                    <p class="text-xs text-slate-400 font-bold">Total Volume</p>
+                    <p id="admVolume" class="text-2xl font-bold text-amber-400 mt-1">₹0</p>
                 </div>
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800">
-                    <p class="text-xs text-slate-400">Smart Engine Mode</p>
-                    <select id="admOutcomeSelect" onchange="changeOutcomeMode(this.value)" class="w-full bg-slate-950 border border-slate-800 mt-1 p-2 rounded text-amber-400 font-bold">
+                <div class="glass-panel p-4">
+                    <p class="text-xs text-slate-400 font-bold">Smart Engine Mode</p>
+                    <select id="admOutcomeSelect" onchange="changeOutcomeMode(this.value)" class="w-full bg-slate-950 border border-slate-700 mt-2 p-2 rounded text-amber-400 font-bold outline-none">
                         <option value="AUTO">SMART AUTO (House Advantage)</option>
                         <option value="FORCE_HEADS">FORCE HEADS</option>
                         <option value="FORCE_TAILS">FORCE TAILS</option>
@@ -180,26 +198,26 @@
             </div>
 
             <!-- Global Settings -->
-            <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 flex items-center space-x-4">
-                <input id="admUpiInput" type="text" placeholder="Active Receiver UPI" class="flex-1 bg-slate-950 border border-slate-800 p-2 rounded text-white">
-                <button onclick="saveAdminUpi()" class="bg-amber-500 text-slate-950 px-4 py-2 rounded-lg font-bold">Update Receiver UPI</button>
+            <div class="glass-panel p-4 flex flex-col md:flex-row items-center gap-4">
+                <input id="admUpiInput" type="text" placeholder="Active Receiver UPI" class="flex-1 w-full bg-slate-950 border border-slate-700 p-3 rounded text-white font-bold">
+                <button onclick="saveAdminUpi()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-6 py-3 rounded-lg font-bold w-full md:w-auto shadow-lg">Update Receiver UPI</button>
             </div>
 
             <!-- Users & Pending Requests -->
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
-                    <h3 class="font-bold border-b border-slate-800 pb-2">Pending Deposits</h3>
-                    <div id="admDepositsList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+                <div class="glass-panel p-4 space-y-2">
+                    <h3 class="font-bold border-b border-slate-700 pb-2 text-white">Pending Deposits</h3>
+                    <div id="admDepositsList" class="space-y-3 max-h-60 overflow-y-auto pr-2"></div>
                 </div>
-                <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
-                    <h3 class="font-bold border-b border-slate-800 pb-2">Pending Withdrawals</h3>
-                    <div id="admWithdrawalsList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+                <div class="glass-panel p-4 space-y-2">
+                    <h3 class="font-bold border-b border-slate-700 pb-2 text-white">Pending Withdrawals</h3>
+                    <div id="admWithdrawalsList" class="space-y-3 max-h-60 overflow-y-auto pr-2"></div>
                 </div>
             </div>
 
-            <div class="bg-slate-900 p-4 rounded-xl border border-slate-800 space-y-2">
-                <h3 class="font-bold border-b border-slate-800 pb-2">User Directory & Wallets</h3>
-                <div id="admUsersList" class="space-y-2 max-h-60 overflow-y-auto text-sm"></div>
+            <div class="glass-panel p-4 space-y-2">
+                <h3 class="font-bold border-b border-slate-700 pb-2 text-white">User Directory & Wallets</h3>
+                <div id="admUsersList" class="space-y-2 max-h-80 overflow-y-auto pr-2"></div>
             </div>
         </div>
     </div>
