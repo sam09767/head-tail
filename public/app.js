@@ -1,276 +1,235 @@
 const socket = io();
-
 let currentChip = 100;
-let userAuthenticated = false;
+let currentUser = localStorage.getItem('username') || null;
 
-// Set Chip Amount
+// --- INITIAL LOAD & PERSISTENT LOGIN ---
+window.onload = () => {
+    if (currentUser) {
+        socket.emit('user_reconnect', currentUser, (res) => {
+            if (res.success) {
+                loginUIUpdate(currentUser, res.balance, res.adminUpi);
+            } else {
+                logout(); // Session invalid
+            }
+        });
+    }
+};
+
+// --- TOAST NOTIFICATIONS ---
+function showToast(message, type = 'info') {
+    const container = document.getElementById('toastContainer');
+    const toast = document.createElement('div');
+    toast.className = `toast-anim p-4 rounded-lg shadow-lg font-bold text-white flex items-center min-w-[250px] ${
+        type === 'success' ? 'bg-emerald-600' : type === 'error' ? 'bg-red-600' : 'bg-slate-700'
+    }`;
+    toast.innerHTML = `<span>${message}</span>`;
+    
+    container.appendChild(toast);
+    setTimeout(() => { toast.remove(); }, 3500);
+}
+
+// --- UTILS ---
 function setChip(amount) {
     currentChip = amount;
     document.getElementById('betAmount').value = amount;
 }
-
-// Modal Handlers
-function openModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) modal.classList.remove('hidden');
-    
-    // Agar history khul rahi hai toh data fetch karo
-    if (modalId === 'historyModal') {
-        fetchUserHistory();
-    }
-    // Agar admin modal khul raha hai toh reset view
-    if (modalId === 'adminModal') {
-        document.getElementById('adminAuthSection').classList.remove('hidden');
-        document.getElementById('adminDashboard').classList.add('hidden');
-        document.getElementById('adminPass').value = '';
-    }
+function openModal(id) {
+    document.getElementById(id).classList.remove('hidden');
+    if (id === 'historyModal') fetchUserHistory();
 }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
 
-function closeModal(modalId) {
-    const modal = document.getElementById(modalId);
-    if (modal) modal.classList.add('hidden');
-}
-
-// Keyboard shortcut for Admin Panel (Ctrl + Shift + A)
-document.addEventListener('keydown', (e) => {
-    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        openModal('adminModal');
-    }
-});
-
-// Authentication (Login / Sign Up)
+// --- AUTHENTICATION ---
 function handleDirectAuth(isSignUp) {
-    const username = document.getElementById('loginUsername').value.trim();
-    const password = document.getElementById('loginPassword').value.trim();
-    const msgEl = document.getElementById('authMsg');
+    const userStr = document.getElementById('loginUsername').value.trim();
+    const pass = document.getElementById('loginPassword').value.trim();
+    
+    if (!userStr || !pass) return document.getElementById('authMsg').innerText = "Enter details";
 
-    if (!username || !password) {
-        msgEl.innerText = "Please enter username and password";
-        return;
-    }
-
-    socket.emit('user_login', { username, password, isSignUp }, (response) => {
-        if (response.success) {
-            userAuthenticated = true;
-            document.getElementById('walletBalance').innerText = `₹${response.userData.balance}`;
-            document.getElementById('userState').classList.remove('hidden');
-            document.getElementById('userState').classList.add('flex');
-            document.getElementById('authBtn').classList.add('hidden');
+    socket.emit('user_login', { username: userStr, password: pass, isSignUp }, (res) => {
+        if (res.success) {
+            currentUser = userStr;
+            localStorage.setItem('username', userStr); // Persistent
+            loginUIUpdate(userStr, res.balance, res.adminUpi);
             closeModal('authModal');
-            msgEl.innerText = "";
-            
-            // Set QR Code if available
-            if (response.adminUpi) {
-                setupQrCode(response.adminUpi);
-            }
+            showToast(`Welcome ${userStr}!`, 'success');
         } else {
-            msgEl.innerText = response.msg;
+            document.getElementById('authMsg').innerText = res.msg;
         }
     });
 }
 
-// Setup QR Code for Deposit
+function loginUIUpdate(username, balance, upi) {
+    document.getElementById('walletBalance').innerText = `₹${balance}`;
+    document.getElementById('authBtn').classList.add('hidden');
+    document.getElementById('userState').classList.remove('hidden');
+    document.getElementById('userState').classList.add('flex');
+    if (upi) setupQrCode(upi);
+}
+
+function logout() {
+    localStorage.removeItem('username');
+    location.reload(); // Refresh page to clear state completely
+}
+
 function setupQrCode(upiId) {
-    const upiString = `upi://pay?pa=${upiId}&pn=COIN3D%20Casino&cu=INR`;
+    const upiStr = `upi://pay?pa=${upiId}&pn=COIN3D%20Casino&cu=INR`;
     document.getElementById('upiIdDisplay').innerText = `UPI: ${upiId}`;
-    const qrContainer = document.getElementById('qrcode');
-    qrContainer.innerHTML = "";
-    new QRCode(qrContainer, {
-        text: upiString,
-        width: 180,
-        height: 180,
-    });
+    document.getElementById('qrcode').innerHTML = "";
+    new QRCode(document.getElementById('qrcode'), { text: upiStr, width: 160, height: 160 });
 }
 
-// Place Bet
+// --- GAME ACTIONS ---
 function placeBet(side) {
-    if (!userAuthenticated) {
-        openModal('authModal');
-        return;
-    }
+    if (!currentUser) return openModal('authModal');
+    
     const amount = parseInt(document.getElementById('betAmount').value);
-    if (isNaN(amount) || amount <= 0) {
-        alert("Please enter a valid bet amount");
-        return;
-    }
-
-    socket.emit('place_bet', { side, amount }, (response) => {
-        if (response.success) {
-            document.getElementById('walletBalance').innerText = `₹${response.newBalance}`;
+    socket.emit('place_bet', { username: currentUser, side, amount }, (res) => {
+        if (res.success) {
+            document.getElementById('walletBalance').innerText = `₹${res.newBalance}`;
+            showToast(`Bet ₹${amount} on ${side} placed!`, 'info');
         } else {
-            alert(response.msg);
+            showToast(res.msg, 'error');
         }
     });
 }
 
-// Submit Deposit Request
 function submitDeposit() {
     const amount = parseInt(document.getElementById('depAmount').value);
-    const txnId = document.getElementById('depTxn').value.trim();
-
-    if (isNaN(amount) || amount <= 0 || !txnId) {
-        alert("Enter valid amount and transaction ID");
-        return;
-    }
-
-    socket.emit('submit_deposit', { amount, txnId }, (response) => {
-        alert(response.msg);
-        if (response.success) {
-            document.getElementById('depAmount').value = '';
-            document.getElementById('depTxn').value = '';
-            closeModal('depositModal');
-        }
+    const txnId = document.getElementById('depTxn').value;
+    socket.emit('submit_deposit', { username: currentUser, amount, txnId }, (res) => {
+        showToast(res.msg, res.success ? 'success' : 'error');
+        if(res.success) closeModal('depositModal');
     });
 }
 
-// Submit Withdrawal Request
 function submitWithdrawal() {
-    const amount = parseInt(document.getElementById('depAmount')?.value || document.getElementById('wdAmount').value);
-    const upi = document.getElementById('wdUpi').value.trim();
-
-    if (isNaN(amount) || amount <= 0 || !upi) {
-        alert("Enter valid amount and UPI ID");
-        return;
-    }
-
-    socket.emit('submit_withdrawal', { amount, upi }, (response) => {
-        alert(response.msg);
-        if (response.success) {
-            document.getElementById('walletBalance').innerText = `₹${response.newBalance}`;
-            document.getElementById('wdAmount').value = '';
-            document.getElementById('wdUpi').value = '';
+    const amount = parseInt(document.getElementById('wdAmount').value);
+    const upi = document.getElementById('wdUpi').value;
+    socket.emit('submit_withdrawal', { username: currentUser, amount, upi }, (res) => {
+        showToast(res.msg, res.success ? 'success' : 'error');
+        if(res.success) {
+            document.getElementById('walletBalance').innerText = `₹${res.newBalance}`;
             closeModal('withdrawModal');
         }
     });
 }
 
-// Fetch User History (Deposit & Withdrawal)
 function fetchUserHistory() {
-    socket.emit('get_user_history', (response) => {
-        if (response.success) {
-            const depositTable = document.getElementById('userDepositHistory');
-            const withdrawTable = document.getElementById('userWithdrawHistory');
-            
-            depositTable.innerHTML = response.deposits.length ? response.deposits.map(d => `
-                <tr>
-                    <td>₹${d.amount}</td>
-                    <td class="status-${d.status.toLowerCase()}">${d.status}</td>
-                    <td>${new Date(d.createdAt).toLocaleDateString()}</td>
-                </tr>
-            `).join('') : `<tr><td colspan="3" class="text-center text-slate-500 py-2">No deposits yet</td></tr>`;
-
-            withdrawTable.innerHTML = response.withdrawals.length ? response.withdrawals.map(w => `
-                <tr>
-                    <td>₹${w.amount}</td>
-                    <td class="status-${w.status.toLowerCase()}">${w.status}</td>
-                    <td>${new Date(w.createdAt).toLocaleDateString()}</td>
-                </tr>
-            `).join('') : `<tr><td colspan="3" class="text-center text-slate-500 py-2">No withdrawals yet</td></tr>`;
-        }
-    });
-}
-
-// Admin Authentication & Dashboard
-function authenticateAdmin() {
-    const pass = document.getElementById('adminPass').value;
-    socket.emit('admin_auth', pass, (res) => {
+    socket.emit('get_user_history', currentUser, (res) => {
         if (res.success) {
-            document.getElementById('adminAuthSection').classList.add('hidden');
-            document.getElementById('adminDashboard').classList.remove('hidden');
-            loadAdminData();
-        } else {
-            alert(res.msg);
+            // Bets History
+            document.getElementById('userBetHistory').innerHTML = res.bets.map(b => `
+                <tr class="border-b border-slate-700">
+                    <td class="p-2">${b.side}</td><td class="p-2">₹${b.amount}</td>
+                    <td class="p-2 status-${b.result.toLowerCase()}">${b.result}</td>
+                    <td class="p-2">₹${b.payout}</td>
+                </tr>
+            `).join('');
+
+            // Txn History (Shortened for brevity)
+            document.getElementById('userDepositHistory').innerHTML = res.deposits.map(d => `<tr><td>₹${d.amount}</td><td class="status-${d.status.toLowerCase()}">${d.status}</td></tr>`).join('');
+            document.getElementById('userWithdrawHistory').innerHTML = res.withdrawals.map(w => `<tr><td>₹${w.amount}</td><td class="status-${w.status.toLowerCase()}">${w.status}</td></tr>`).join('');
         }
     });
 }
 
-function loadAdminData() {
-    socket.emit('admin_get_data', (data) => {
-        document.getElementById('admProfit').innerText = `₹${data.houseProfit}`;
-        document.getElementById('admVolume').innerText = `₹${data.totalVolume}`;
-        document.getElementById('admUpiInput').value = data.adminUpi;
-        document.getElementById('admOutcomeSelect').value = data.forcedOutcome;
-
-        // Render Deposits
-        document.getElementById('admDepositsList').innerHTML = data.deposits.length ? data.deposits.map(d => `
-            <div class="bg-slate-900 p-3 rounded flex justify-between items-center text-sm">
-                <div><b>${d.username}</b>: ₹${d.amount}<br><span class="text-xs text-slate-400">UTR: ${d.txnId}</span></div>
-                <div class="space-x-2">
-                    <button onclick="processDeposit('${d.id || d._id}', 'APPROVED')" class="bg-emerald-600 px-2 py-1 rounded text-xs font-bold">Approve</button>
-                    <button onclick="processDeposit('${d.id || d._id}', 'REJECTED')" class="bg-red-600 px-2 py-1 rounded text-xs font-bold">Reject</button>
-                </div>
-            </div>
-        `).join('') : '<p class="text-xs text-slate-500">No pending deposits</p>';
-
-        // Render Withdrawals
-        document.getElementById('admWithdrawalsList').innerHTML = data.withdrawals.length ? data.withdrawals.map(w => `
-            <div class="bg-slate-900 p-3 rounded flex justify-between items-center text-sm">
-                <div><b>${w.username}</b>: ₹${w.amount}<br><span class="text-xs text-slate-400">UPI: ${w.upiDetails}</span></div>
-                <div class="space-x-2">
-                    <button onclick="processWithdrawal('${w.id || w._id}', 'APPROVED')" class="bg-emerald-600 px-2 py-1 rounded text-xs font-bold">Approve</button>
-                    <button onclick="processWithdrawal('${w.id || w._id}', 'REJECTED')" class="bg-red-600 px-2 py-1 rounded text-xs font-bold">Reject</button>
-                </div>
-            </div>
-        `).join('') : '<p class="text-xs text-slate-500">No pending withdrawals</p>';
-
-        // Render Users
-        document.getElementById('admUsersList').innerHTML = data.users.map(u => `
-            <div class="bg-slate-900 p-3 rounded flex justify-between items-center text-sm">
-                <div><b>${u.username}</b> - Bal: <span class="text-amber-400">₹${u.balance}</span></div>
-                <div class="space-x-2">
-                    <button onclick="updateUserBal('${u.username}', 100)" class="bg-blue-600 px-2 py-1 rounded text-xs">+₹100</button>
-                    <button onclick="updateUserBal('${u.username}', -100)" class="bg-orange-600 px-2 py-1 rounded text-xs">-₹100</button>
-                </div>
-            </div>
-        `).join('');
-    });
-}
-
-function processDeposit(id, action) {
-    socket.emit('admin_process_deposit', { id, action });
-}
-
-function processWithdrawal(id, action) {
-    socket.emit('admin_process_withdrawal', { id, action });
-}
-
-function updateUserBal(username, delta) {
-    socket.emit('admin_update_balance', { username, delta });
-}
-
-function saveAdminUpi() {
-    const newUpi = document.getElementById('admUpiInput').value.trim();
-    if (newUpi) {
-        socket.emit('admin_update_upi', newUpi);
-        alert("UPI Updated Successfully");
-    }
-}
-
-function changeOutcomeMode(mode) {
-    socket.emit('admin_set_outcome', mode);
-}
-
-// Realtime Listeners from Socket
+// --- SOCKET EVENTS & ANIMATIONS ---
 socket.on('timer_tick', (data) => {
     document.getElementById('timerDisplay').innerText = `00:${data.timer < 10 ? '0' : ''}${data.timer}`;
-    const progress = (data.timer / 30) * 100;
-    document.getElementById('timerBar').style.width = `${progress}%`;
+    document.getElementById('timerBar').style.width = `${(data.timer / 30) * 100}%`;
+
+    // Reset coin animation logic slightly if timer restarts
+    if(data.timer === 30) {
+        document.getElementById('coin').style.transition = 'none';
+        document.getElementById('coin').style.transform = 'rotateY(0deg)'; // reset instantly before next spin
+    }
 });
 
+// Personal Win/Loss Alert
+socket.on('personal_result', (data) => {
+    if(data.isWin) {
+        showToast(`🎉 You Won ₹${data.amount}!`, 'success');
+        let currentBal = parseFloat(document.getElementById('walletBalance').innerText.replace('₹', ''));
+        document.getElementById('walletBalance').innerText = `₹${currentBal + data.amount}`;
+    } else {
+        showToast(`❌ You Lost your bet.`, 'error');
+    }
+});
+
+// Main Game Result & Animation
+let spinCount = 0;
 socket.on('game_result', (data) => {
+    // History strip update
     document.getElementById('history').innerHTML = data.history.map(h => `
         <div class="history-badge ${h.toLowerCase()}">${h[0]}</div>
     `).join('');
 
+    // 3D Coin Spin Animation (Spins 5 times + result)
+    spinCount += 5; // Multiplier for extra spins
+    const baseRotation = spinCount * 360; 
+    const finalRotation = data.outcome === 'HEADS' ? baseRotation : baseRotation + 180;
+    
     const coin = document.getElementById('coin');
-    if (data.outcome === 'HEADS') {
-        coin.style.transform = 'rotateY(0deg)';
-    } else {
-        coin.style.transform = 'rotateY(180deg)';
+    coin.style.transition = 'transform 3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+    coin.style.transform = `rotateY(${finalRotation}deg)`;
+});
+
+// --- ADMIN PANEL SYSTEM ---
+document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault(); openModal('adminModal');
     }
 });
 
-socket.on('admin_data_refresh', () => {
-    loadAdminData();
+function authenticateAdmin() {
+    socket.emit('admin_auth', document.getElementById('adminPass').value, (res) => {
+        if(res.success) {
+            document.getElementById('adminAuthSection').classList.add('hidden');
+            document.getElementById('adminDashboard').classList.remove('hidden');
+            loadAdminData();
+        } else showToast(res.msg, 'error');
+    });
+}
+
+function loadAdminData() { socket.emit('admin_get_data', renderAdminData); }
+socket.on('admin_data_refresh', loadAdminData);
+
+// Admin real-time pool listener
+socket.on('admin_live_bets', (data) => {
+    const h = document.getElementById('admHeadsPool');
+    const t = document.getElementById('admTailsPool');
+    if(h) h.innerText = `₹${data.heads}`;
+    if(t) t.innerText = `₹${data.tails}`;
 });
+
+function renderAdminData(data) {
+    document.getElementById('admProfit').innerText = `₹${data.houseProfit}`;
+    document.getElementById('admVolume').innerText = `₹${data.totalVolume}`;
+    document.getElementById('admOutcomeSelect').value = data.forcedOutcome;
+    
+    document.getElementById('admHeadsPool').innerText = `₹${data.livePool.heads}`;
+    document.getElementById('admTailsPool').innerText = `₹${data.livePool.tails}`;
+
+    document.getElementById('admDepositsList').innerHTML = data.deposits.map(d => `
+        <div class="bg-slate-800 p-2 text-sm rounded flex justify-between">
+            <span><b>${d.username}</b>: ₹${d.amount}</span>
+            <div>
+                <button onclick="socket.emit('admin_process_deposit', {id:'${d._id}', action:'APPROVED'})" class="bg-green-600 px-2 rounded">✓</button>
+                <button onclick="socket.emit('admin_process_deposit', {id:'${d._id}', action:'REJECTED'})" class="bg-red-600 px-2 rounded">✖</button>
+            </div>
+        </div>
+    `).join('');
+
+    document.getElementById('admWithdrawalsList').innerHTML = data.withdrawals.map(w => `
+        <div class="bg-slate-800 p-2 text-sm rounded flex justify-between">
+            <span><b>${w.username}</b>: ₹${w.amount}</span>
+            <div>
+                <button onclick="socket.emit('admin_process_withdrawal', {id:'${w._id}', action:'APPROVED'})" class="bg-green-600 px-2 rounded">✓</button>
+                <button onclick="socket.emit('admin_process_withdrawal', {id:'${w._id}', action:'REJECTED'})" class="bg-red-600 px-2 rounded">✖</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function changeOutcomeMode(mode) { socket.emit('admin_set_outcome', mode); }
