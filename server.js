@@ -1,328 +1,1032 @@
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const mongoose = require('mongoose');
-const cors = require('cors');
-const path = require('path');
+require("dotenv").config();
+
+const express = require("express");
+const http = require("http");
+const path = require("path");
+const mongoose = require("mongoose");
+const session = require("express-session");
+const bcrypt = require("bcryptjs");
+const { Server } = require("socket.io");
 
 const app = express();
-app.use(cors());
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = Number(process.env.PORT || 3000);
+
+if (!process.env.MONGODB_URI) {
+  console.error("MONGODB_URI missing in .env");
+  process.exit(1);
+}
+
+if (!process.env.SESSION_SECRET) {
+  console.error("SESSION_SECRET missing in .env");
+  process.exit(1);
+}
+
 app.use(express.json());
 
-// 1. 'public' folder se static files serve karein
-app.use(express.static(path.join(__dirname, 'public')));
-
-const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] }
-});
-
-// MongoDB Connection
-const MONGO_URI = process.env.MONGO_URI || "mongodb://127.0.0.1:27017/coinflip_casino";
-mongoose.connect(MONGO_URI)
-    .then(() => console.log("MongoDB Database Connected Successfully"))
-    .catch(err => console.error("MongoDB Connection Error:", err));
-
-// Database Schemas
-const UserSchema = new mongoose.Schema({
-    username: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    balance: { type: Number, default: 0 },
-    isOnline: { type: Boolean, default: false }
-});
-
-const DepositSchema = new mongoose.Schema({
-    username: { type: String, required: true },
-    amount: { type: Number, required: true },
-    txnId: { type: String, required: true },
-    status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const WithdrawalSchema = new mongoose.Schema({
-    username: { type: String, required: true },
-    amount: { type: Number, required: true },
-    upiDetails: { type: String, required: true },
-    status: { type: String, enum: ['PENDING', 'APPROVED', 'REJECTED'], default: 'PENDING' },
-    createdAt: { type: Date, default: Date.now }
-});
-
-const SettingSchema = new mongoose.Schema({
-    key: { type: String, required: true, unique: true },
-    value: { type: String, required: true }
-});
-
-const User = mongoose.model('User', UserSchema);
-const Deposit = mongoose.model('Deposit', DepositSchema);
-const Withdrawal = mongoose.model('Withdrawal', WithdrawalSchema);
-const Setting = mongoose.model('Setting', SettingSchema);
-
-// System State
-let gameTimer = 30;
-let currentBets = []; // Array of { socketId, username, side, amount }
-let forcedOutcome = 'AUTO'; // 'AUTO', 'FORCE_HEADS', 'FORCE_TAILS'
-let houseProfit = 0;
-let totalVolume = 0;
-let history = [];
-
-// Initialize Default Settings
-async function initSettings() {
-    try {
-        const upi = await Setting.findOne({ key: 'admin_upi' });
-        if (!upi) {
-            await Setting.create({ key: 'admin_upi', value: 'paytmqr@upi' });
-        }
-    } catch (err) {
-        console.error("Settings initialization error:", err);
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: false,
+      maxAge: 7 * 24 * 60 * 60 * 1000
     }
+  })
+);
+
+app.use(express.static(path.join(__dirname, "public")));
+
+/* =========================================================
+   DATABASE
+========================================================= */
+
+const userSchema = new mongoose.Schema(
+  {
+    username: {
+      type: String,
+      required: true,
+      unique: true,
+      trim: true,
+      minlength: 3,
+      maxlength: 30
+    },
+
+    passwordHash: {
+      type: String,
+      required: true
+    },
+
+    balance: {
+      type: Number,
+      default: 0,
+      min: 0
+    },
+
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  { versionKey: false }
+);
+
+const betSchema = new mongoose.Schema(
+  {
+    roundId: {
+      type: Number,
+      required: true
+    },
+
+    username: {
+      type: String,
+      required: true
+    },
+
+    side: {
+      type: String,
+      enum: ["HEADS", "TAILS"],
+      required: true
+    },
+
+    amount: {
+      type: Number,
+      required: true,
+      min: 1
+    },
+
+    result: {
+      type: String,
+      enum: ["PENDING", "WIN", "LOSS"],
+      default: "PENDING"
+    },
+
+    payout: {
+      type: Number,
+      default: 0
+    },
+
+    createdAt: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  { versionKey: false }
+);
+
+betSchema.index(
+  {
+    roundId: 1,
+    username: 1
+  },
+  {
+    unique: true
+  }
+);
+
+const roundSchema = new mongoose.Schema(
+  {
+    roundId: {
+      type: Number,
+      unique: true
+    },
+
+    heads: {
+      type: Number,
+      default: 0
+    },
+
+    tails: {
+      type: Number,
+      default: 0
+    },
+
+    result: {
+      type: String,
+      enum: ["HEADS", "TAILS", null],
+      default: null
+    },
+
+    startedAt: Date,
+    endedAt: Date
+  },
+  { versionKey: false }
+);
+
+const User = mongoose.model("User", userSchema);
+const Bet = mongoose.model("Bet", betSchema);
+const Round = mongoose.model("Round", roundSchema);
+
+/* =========================================================
+   GAME STATE
+========================================================= */
+
+const ROUND_LENGTH = 30_000;
+const BETTING_LENGTH = 27_000;
+
+let roundId = 1;
+let roundStartedAt = Date.now();
+let roundPhase = "BETTING";
+let currentResult = null;
+
+let forceMode = "AUTO";
+
+const recentResults = [];
+
+const onlineUsers = new Set();
+
+let gameTimer = null;
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function cleanUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 30);
 }
-initSettings();
 
-// Core Game Loop
-setInterval(async () => {
-    gameTimer--;
+function cleanSide(value) {
+  const side = String(value || "").toUpperCase();
 
-    const headsTotal = currentBets.filter(b => b.side === 'HEADS').reduce((a, b) => a + b.amount, 0);
-    const tailsTotal = currentBets.filter(b => b.side === 'TAILS').reduce((a, b) => a + b.amount, 0);
+  if (side !== "HEADS" && side !== "TAILS") {
+    return null;
+  }
 
-    let projectedOutcome = 'HEADS';
-    if (headsTotal < tailsTotal) {
-        projectedOutcome = 'HEADS';
-    } else if (tailsTotal < headsTotal) {
-        projectedOutcome = 'TAILS';
+  return side;
+}
+
+function publicState() {
+  const elapsed = Date.now() - roundStartedAt;
+
+  return {
+    roundId,
+    phase: roundPhase,
+    remainingMs: Math.max(0, ROUND_LENGTH - elapsed),
+    bettingRemainingMs: Math.max(0, BETTING_LENGTH - elapsed),
+    result: currentResult,
+    recentResults
+  };
+}
+
+async function getPools() {
+  const rows = await Bet.aggregate([
+    {
+      $match: {
+        roundId,
+        result: "PENDING"
+      }
+    },
+    {
+      $group: {
+        _id: "$side",
+        total: { $sum: "$amount" }
+      }
+    }
+  ]);
+
+  const pools = {
+    HEADS: 0,
+    TAILS: 0
+  };
+
+  for (const row of rows) {
+    pools[row._id] = row.total;
+  }
+
+  return pools;
+}
+
+function broadcastState() {
+  io.emit("game:state", publicState());
+}
+
+/* =========================================================
+   RESULT ENGINE
+========================================================= */
+
+async function calculateResult() {
+  const pools = await getPools();
+
+  let result;
+
+  if (forceMode === "HEADS") {
+    result = "HEADS";
+  } else if (forceMode === "TAILS") {
+    result = "TAILS";
+  } else {
+    if (pools.HEADS === pools.TAILS) {
+      result = Math.random() < 0.5 ? "HEADS" : "TAILS";
     } else {
-        projectedOutcome = Math.random() < 0.5 ? 'HEADS' : 'TAILS';
+      result =
+        pools.HEADS < pools.TAILS
+          ? "HEADS"
+          : "TAILS";
+    }
+  }
+
+  return result;
+}
+
+/* =========================================================
+   ROUND SETTLEMENT
+========================================================= */
+
+async function settleRound() {
+  try {
+    roundPhase = "RESULT";
+
+    currentResult = await calculateResult();
+
+    const session = await mongoose.startSession();
+
+    try {
+      await session.withTransaction(async () => {
+        const winningBets = await Bet.find({
+          roundId,
+          side: currentResult
+        }).session(session);
+
+        const losingBets = await Bet.find({
+          roundId,
+          side: { $ne: currentResult }
+        }).session(session);
+
+        for (const bet of winningBets) {
+          const payout = bet.amount * 2;
+
+          await User.updateOne(
+            { username: bet.username },
+            {
+              $inc: {
+                balance: payout
+              }
+            },
+            { session }
+          );
+
+          bet.result = "WIN";
+          bet.payout = payout;
+
+          await bet.save({ session });
+        }
+
+        await Bet.updateMany(
+          {
+            _id: {
+              $in: losingBets.map((b) => b._id)
+            }
+          },
+          {
+            $set: {
+              result: "LOSS",
+              payout: 0
+            }
+          },
+          { session }
+        );
+
+        await Round.updateOne(
+          { roundId },
+          {
+            $set: {
+              result: currentResult,
+              endedAt: new Date()
+            }
+          },
+          { session }
+        );
+      });
+    } finally {
+      await session.endSession();
     }
 
-    if (gameTimer === 0) {
-        let finalOutcome = projectedOutcome;
-        if (forcedOutcome === 'FORCE_HEADS') finalOutcome = 'HEADS';
-        if (forcedOutcome === 'FORCE_TAILS') finalOutcome = 'TAILS';
+    recentResults.unshift(currentResult);
 
-        let winners = [];
-        let roundPayout = 0;
-        let roundBetTotal = headsTotal + tailsTotal;
-        totalVolume += roundBetTotal;
-
-        for (let bet of currentBets) {
-            if (bet.side === finalOutcome) {
-                const winAmount = bet.amount * 2;
-                roundPayout += winAmount;
-                winners.push({ username: bet.username, amount: winAmount });
-                
-                await User.findOneAndUpdate(
-                    { username: bet.username },
-                    { $inc: { balance: winAmount } }
-                );
-            }
-        }
-
-        houseProfit += (roundBetTotal - roundPayout);
-        history.unshift(finalOutcome);
-        if (history.length > 10) history.pop();
-
-        io.emit('game_result', {
-            outcome: finalOutcome,
-            winners,
-            history,
-            headsTotal,
-            tailsTotal
-        });
-
-        currentBets = [];
-        gameTimer = 30;
+    if (recentResults.length > 15) {
+      recentResults.pop();
     }
 
-    io.emit('timer_tick', {
-        timer: gameTimer,
-        headsTotal,
-        tailsTotal,
-        projectedAutoOutcome: projectedOutcome,
-        forcedOutcome
+    io.emit("game:result", {
+      roundId,
+      result: currentResult,
+      recentResults
     });
-}, 1000);
 
-// Realtime Socket Handlers
-io.on('connection', (socket) => {
+    setTimeout(startNewRound, 3000);
+  } catch (error) {
+    console.error("Settlement error:", error);
+  }
+}
 
-    socket.on('user_login', async (data, callback) => {
-        try {
-            let user = await User.findOne({ username: data.username });
-            if (data.isSignUp) {
-                if (user) return callback({ success: false, msg: "User already exists!" });
-                user = await User.create({ username: data.username, password: data.password, balance: 100 });
-            } else {
-                if (!user || user.password !== data.password) {
-                    return callback({ success: false, msg: "Invalid username or password!" });
-                }
-            }
-            user.isOnline = true;
-            await user.save();
-            
-            socket.username = user.username;
-            const upiSetting = await Setting.findOne({ key: 'admin_upi' });
+/* =========================================================
+   NEW ROUND
+========================================================= */
 
-            callback({
-                success: true,
-                userData: { username: user.username, balance: user.balance },
-                adminUpi: upiSetting ? upiSetting.value : 'paytmqr@upi'
-            });
-        } catch (e) {
-            callback({ success: false, msg: "Server Error during login" });
+async function startNewRound() {
+  roundId++;
+  roundStartedAt = Date.now();
+  roundPhase = "BETTING";
+  currentResult = null;
+
+  try {
+    await Round.create({
+      roundId,
+      heads: 0,
+      tails: 0,
+      startedAt: new Date()
+    });
+  } catch (error) {
+    console.error("Round creation error:", error);
+  }
+
+  io.emit("game:new-round", {
+    roundId
+  });
+
+  broadcastState();
+}
+
+/* =========================================================
+   CLOCK
+========================================================= */
+
+function runGameClock() {
+  clearInterval(gameTimer);
+
+  gameTimer = setInterval(async () => {
+    const elapsed = Date.now() - roundStartedAt;
+
+    if (
+      roundPhase === "BETTING" &&
+      elapsed >= BETTING_LENGTH
+    ) {
+      roundPhase = "LOCKED";
+
+      io.emit("game:locked", {
+        roundId
+      });
+    }
+
+    if (
+      roundPhase === "LOCKED" &&
+      elapsed >= ROUND_LENGTH
+    ) {
+      clearInterval(gameTimer);
+      await settleRound();
+    }
+
+    broadcastState();
+  }, 250);
+}
+
+/* =========================================================
+   AUTH
+========================================================= */
+
+app.post("/api/register", async (req, res) => {
+  try {
+    const username = cleanUsername(req.body.username);
+    const password = String(req.body.password || "");
+
+    if (username.length < 3) {
+      return res.status(400).json({
+        error: "Username minimum 3 characters."
+      });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({
+        error: "Password minimum 6 characters."
+      });
+    }
+
+    const exists = await User.exists({ username });
+
+    if (exists) {
+      return res.status(409).json({
+        error: "Username already exists."
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await User.create({
+      username,
+      passwordHash,
+      balance: 0
+    });
+
+    req.session.username = username;
+
+    res.json({
+      success: true,
+      username,
+      balance: 0
+    });
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      error: "Registration failed."
+    });
+  }
+});
+
+app.post("/api/login", async (req, res) => {
+  try {
+    const username = cleanUsername(req.body.username);
+    const password = String(req.body.password || "");
+
+    const user = await User.findOne({ username });
+
+    if (!user) {
+      return res.status(401).json({
+        error: "Invalid username or password."
+      });
+    }
+
+    const valid = await bcrypt.compare(
+      password,
+      user.passwordHash
+    );
+
+    if (!valid) {
+      return res.status(401).json({
+        error: "Invalid username or password."
+      });
+    }
+
+    req.session.username = username;
+
+    res.json({
+      success: true,
+      username,
+      balance: user.balance
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Login failed."
+    });
+  }
+});
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.json({
+      success: true
+    });
+  });
+});
+
+app.get("/api/me", async (req, res) => {
+  if (!req.session.username) {
+    return res.json({
+      loggedIn: false
+    });
+  }
+
+  const user = await User.findOne({
+    username: req.session.username
+  }).lean();
+
+  if (!user) {
+    return res.json({
+      loggedIn: false
+    });
+  }
+
+  res.json({
+    loggedIn: true,
+    username: user.username,
+    balance: user.balance
+  });
+});
+
+/* =========================================================
+   DEMO WALLET
+========================================================= */
+
+app.post("/api/demo-credit", async (req, res) => {
+  if (!req.session.username) {
+    return res.status(401).json({
+      error: "Login required."
+    });
+  }
+
+  const amount = Number(req.body.amount);
+
+  if (
+    !Number.isFinite(amount) ||
+    amount <= 0 ||
+    amount > 10000
+  ) {
+    return res.status(400).json({
+      error: "Invalid demo amount."
+    });
+  }
+
+  const user = await User.findOneAndUpdate(
+    {
+      username: req.session.username
+    },
+    {
+      $inc: {
+        balance: amount
+      }
+    },
+    {
+      new: true
+    }
+  );
+
+  res.json({
+    success: true,
+    balance: user.balance
+  });
+});
+
+/* =========================================================
+   BET
+========================================================= */
+
+app.post("/api/bet", async (req, res) => {
+  try {
+    if (!req.session.username) {
+      return res.status(401).json({
+        error: "Login required."
+      });
+    }
+
+    if (roundPhase !== "BETTING") {
+      return res.status(400).json({
+        error: "Betting is locked."
+      });
+    }
+
+    const side = cleanSide(req.body.side);
+    const amount = Number(req.body.amount);
+
+    if (!side) {
+      return res.status(400).json({
+        error: "Invalid side."
+      });
+    }
+
+    if (
+      !Number.isFinite(amount) ||
+      amount < 1 ||
+      amount > 100000
+    ) {
+      return res.status(400).json({
+        error: "Invalid amount."
+      });
+    }
+
+    const existingBet = await Bet.exists({
+      roundId,
+      username: req.session.username
+    });
+
+    if (existingBet) {
+      return res.status(400).json({
+        error: "One bet per round only."
+      });
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      {
+        username: req.session.username,
+        balance: {
+          $gte: amount
         }
-    });
-
-    socket.on('place_bet', async (data, callback) => {
-        if (gameTimer <= 3) return callback({ success: false, msg: "Betting locked for spin!" });
-        if (!socket.username) return callback({ success: false, msg: "Please login first!" });
-
-        try {
-            const user = await User.findOne({ username: socket.username });
-            if (!user || user.balance < data.amount) {
-                return callback({ success: false, msg: "Insufficient Balance!" });
-            }
-
-            user.balance -= data.amount;
-            await user.save();
-
-            currentBets.push({
-                socketId: socket.id,
-                username: socket.username,
-                side: data.side,
-                amount: data.amount
-            });
-
-            callback({ success: true, newBalance: user.balance });
-            io.emit('new_bet_placed', { username: socket.username, side: data.side, amount: data.amount });
-        } catch (e) {
-            callback({ success: false, msg: "Database operation failed" });
+      },
+      {
+        $inc: {
+          balance: -amount
         }
-    });
+      },
+      {
+        new: true
+      }
+    );
 
-    socket.on('submit_deposit', async (data, callback) => {
-        try {
-            await Deposit.create({
-                username: socket.username,
-                amount: data.amount,
-                txnId: data.txnId
-            });
-            callback({ success: true, msg: "Deposit Request Submitted!" });
-        } catch (e) {
-            callback({ success: false, msg: "Error submitting deposit." });
+    if (!updatedUser) {
+      return res.status(400).json({
+        error: "Insufficient demo balance."
+      });
+    }
+
+    try {
+      await Bet.create({
+        roundId,
+        username: req.session.username,
+        side,
+        amount
+      });
+    } catch (error) {
+      await User.updateOne(
+        {
+          username: req.session.username
+        },
+        {
+          $inc: {
+            balance: amount
+          }
         }
-    });
+      );
 
-    socket.on('submit_withdrawal', async (data, callback) => {
-        try {
-            const user = await User.findOne({ username: socket.username });
-            if (!user || user.balance < data.amount) {
-                return callback({ success: false, msg: "Insufficient balance!" });
-            }
-
-            user.balance -= data.amount;
-            await user.save();
-
-            await Withdrawal.create({
-                username: socket.username,
-                amount: data.amount,
-                upiDetails: data.upi
-            });
-
-            callback({ success: true, newBalance: user.balance, msg: "Withdrawal Requested!" });
-        } catch (e) {
-            callback({ success: false, msg: "Error processing withdrawal." });
-        }
-    });
-
-    // NEW ADDED: Fetch user's deposit and withdrawal history
-    socket.on('get_user_history', async (callback) => {
-        if (!socket.username) return callback({ success: false, msg: "Please login first!" });
-        try {
-            const deposits = await Deposit.find({ username: socket.username }).sort({ createdAt: -1 });
-            const withdrawals = await Withdrawal.find({ username: socket.username }).sort({ createdAt: -1 });
-            callback({ success: true, deposits, withdrawals });
-        } catch (e) {
-            callback({ success: false, msg: "Error fetching history." });
-        }
-    });
-
-    // Admin Panel Handlers
-    socket.on('admin_auth', (password, callback) => {
-        if (password === 'admin123') {
-            callback({ success: true });
-        } else {
-            callback({ success: false, msg: "Incorrect Admin Password" });
-        }
-    });
-
-    socket.on('admin_get_data', async (callback) => {
-        const users = await User.find({}, 'username balance isOnline');
-        const deposits = await Deposit.find({ status: 'PENDING' });
-        const withdrawals = await Withdrawal.find({ status: 'PENDING' });
-        const upiSetting = await Setting.findOne({ key: 'admin_upi' });
-
-        callback({
-            users,
-            deposits,
-            withdrawals,
-            houseProfit,
-            totalVolume,
-            adminUpi: upiSetting ? upiSetting.value : '',
-            forcedOutcome
+      if (error.code === 11000) {
+        return res.status(400).json({
+          error: "Bet already placed."
         });
-    });
+      }
 
-    socket.on('admin_set_outcome', (mode) => {
-        forcedOutcome = mode;
-        io.emit('admin_state_updated', { forcedOutcome });
-    });
+      throw error;
+    }
 
-    socket.on('admin_process_deposit', async ({ id, action }) => {
-        const dep = await Deposit.findById(id);
-        if (dep && dep.status === 'PENDING') {
-            dep.status = action;
-            await dep.save();
-            if (action === 'APPROVED') {
-                await User.findOneAndUpdate({ username: dep.username }, { $inc: { balance: dep.amount } });
-            }
-            io.emit('admin_data_refresh');
+    await Round.updateOne(
+      {
+        roundId
+      },
+      {
+        $inc: {
+          [side === "HEADS" ? "heads" : "tails"]: amount
         }
+      }
+    );
+
+    res.json({
+      success: true,
+      balance: updatedUser.balance,
+      roundId,
+      side,
+      amount
     });
 
-    socket.on('admin_process_withdrawal', async ({ id, action }) => {
-        const wd = await Withdrawal.findById(id);
-        if (wd && wd.status === 'PENDING') {
-            wd.status = action;
-            await wd.save();
-            if (action === 'REJECTED') {
-                await User.findOneAndUpdate({ username: wd.username }, { $inc: { balance: wd.amount } });
-            }
-            io.emit('admin_data_refresh');
-        }
+    io.emit("feed:new", {
+      text: `${req.session.username} placed a demo bet on ${side}.`
     });
+  } catch (error) {
+    console.error("Bet error:", error);
 
-    socket.on('admin_update_balance', async ({ username, delta }) => {
-        await User.findOneAndUpdate({ username }, { $inc: { balance: delta } });
-        io.emit('admin_data_refresh');
+    res.status(500).json({
+      error: "Could not place bet."
     });
-
-    socket.on('admin_update_upi', async (newUpi) => {
-        await Setting.findOneAndUpdate({ key: 'admin_upi' }, { value: newUpi }, { upsert: true });
-        io.emit('upi_updated', newUpi);
-    });
-
-    socket.on('disconnect', async () => {
-        if (socket.username) {
-            await User.findOneAndUpdate({ username: socket.username }, { isOnline: false });
-        }
-    });
+  }
 });
 
-// 2. Fallback Route
-app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+/* =========================================================
+   USER HISTORY
+========================================================= */
+
+app.get("/api/history", async (req, res) => {
+  if (!req.session.username) {
+    return res.status(401).json({
+      error: "Login required."
+    });
+  }
+
+  const bets = await Bet.find({
+    username: req.session.username
+  })
+    .sort({ createdAt: -1 })
+    .limit(50)
+    .lean();
+
+  res.json({
+    bets
+  });
 });
 
-// Server Listen
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Casino Server running on port ${PORT}`));
+/* =========================================================
+   ADMIN
+========================================================= */
+
+function adminRequired(req, res, next) {
+  if (!req.session.admin) {
+    return res.status(401).json({
+      error: "Admin authentication required."
+    });
+  }
+
+  next();
+}
+
+app.post("/api/admin/login", (req, res) => {
+  const password = String(req.body.password || "");
+
+  if (
+    !process.env.ADMIN_PASS ||
+    password !== process.env.ADMIN_PASS
+  ) {
+    return res.status(401).json({
+      error: "Invalid admin password."
+    });
+  }
+
+  req.session.admin = true;
+
+  res.json({
+    success: true
+  });
+});
+
+app.post("/api/admin/logout", (req, res) => {
+  req.session.admin = false;
+
+  res.json({
+    success: true
+  });
+});
+
+app.get(
+  "/api/admin/state",
+  adminRequired,
+  async (req, res) => {
+    const pools = await getPools();
+
+    const totalUsers = await User.countDocuments();
+
+    const activeUsers = onlineUsers.size;
+
+    const allBets = await Bet.countDocuments();
+
+    res.json({
+      roundId,
+      phase: roundPhase,
+      result: currentResult,
+      forceMode,
+      pools,
+      totalUsers,
+      activeUsers,
+      totalBets: allBets,
+      recentResults
+    });
+  }
+);
+
+app.post(
+  "/api/admin/mode",
+  adminRequired,
+  async (req, res) => {
+    const mode = String(req.body.mode || "AUTO").toUpperCase();
+
+    if (!["AUTO", "HEADS", "TAILS"].includes(mode)) {
+      return res.status(400).json({
+        error: "Invalid mode."
+      });
+    }
+
+    forceMode = mode;
+
+    io.emit("admin:mode-changed", {
+      mode: forceMode
+    });
+
+    res.json({
+      success: true,
+      mode: forceMode
+    });
+  }
+);
+
+app.get(
+  "/api/admin/users",
+  adminRequired,
+  async (req, res) => {
+    const search = String(req.query.search || "")
+      .trim()
+      .toLowerCase();
+
+    const query = search
+      ? {
+          username: {
+            $regex: search,
+            $options: "i"
+          }
+        }
+      : {};
+
+    const users = await User.find(query)
+      .select("username balance createdAt")
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    res.json({
+      users
+    });
+  }
+);
+
+app.post(
+  "/api/admin/wallet",
+  adminRequired,
+  async (req, res) => {
+    const username = cleanUsername(req.body.username);
+    const action = String(req.body.action || "").toLowerCase();
+    const amount = Number(req.body.amount);
+
+    if (!username) {
+      return res.status(400).json({
+        error: "Username required."
+      });
+    }
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({
+        error: "Invalid amount."
+      });
+    }
+
+    let update;
+
+    if (action === "add") {
+      update = {
+        $inc: {
+          balance: amount
+        }
+      };
+    } else if (action === "deduct") {
+      update = {
+        $inc: {
+          balance: -amount
+        }
+      };
+    } else if (action === "reset") {
+      update = {
+        $set: {
+          balance: 0
+        }
+      };
+    } else {
+      return res.status(400).json({
+        error: "Invalid wallet action."
+      });
+    }
+
+    const user = await User.findOneAndUpdate(
+      action === "deduct"
+        ? {
+            username,
+            balance: {
+              $gte: amount
+            }
+          }
+        : {
+            username
+          },
+      update,
+      {
+        new: true
+      }
+    );
+
+    if (!user) {
+      return res.status(400).json({
+        error: "User not found or insufficient balance."
+      });
+    }
+
+    io.emit("user:wallet-updated", {
+      username,
+      balance: user.balance
+    });
+
+    res.json({
+      success: true,
+      username,
+      balance: user.balance
+    });
+  }
+);
+
+/* =========================================================
+   SOCKET.IO
+========================================================= */
+
+io.on("connection", (socket) => {
+  socket.emit("game:state", publicState());
+
+  socket.on("user:online", (username) => {
+    if (username) {
+      onlineUsers.add(username);
+    }
+  });
+
+  socket.on("user:offline", (username) => {
+    if (username) {
+      onlineUsers.delete(username);
+    }
+  });
+
+  socket.on("admin:subscribe", (data) => {
+    if (data && data.admin === true) {
+      socket.join("admin_room");
+    }
+  });
+
+  socket.on("admin:pools", async () => {
+    if (!socket.rooms.has("admin_room")) return;
+
+    const pools = await getPools();
+
+    io.to("admin_room").emit("admin:pools", {
+      roundId,
+      pools
+    });
+  });
+
+  socket.on("disconnect", () => {
+    // Socket disconnect handled naturally.
+  });
+});
+
+/* =========================================================
+   START
+========================================================= */
+
+async function start() {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI);
+
+    console.log("MongoDB connected.");
+
+    const latestRound = await Round.findOne()
+      .sort({ roundId: -1 })
+      .lean();
+
+    if (latestRound) {
+      roundId = latestRound.roundId + 1;
+    }
+
+    await Round.create({
+      roundId,
+      heads: 0,
+      tails: 0,
+      startedAt: new Date()
+    });
+
+    roundStartedAt = Date.now();
+
+    runGameClock();
+
+    server.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error("Startup error:", error);
+    process.exit(1);
+  }
+}
+
+start();
