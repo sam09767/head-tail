@@ -9,7 +9,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 1. 'public' folder se static files (index.html, app.js, style.css) serve karein
+// 1. 'public' folder se static files serve karein
 app.use(express.static(path.join(__dirname, 'public')));
 
 const server = http.createServer(app);
@@ -78,15 +78,13 @@ async function initSettings() {
 }
 initSettings();
 
-// Core Game Loop (30 Seconds Timer)
+// Core Game Loop
 setInterval(async () => {
     gameTimer--;
 
-    // Compute Bet Totals
     const headsTotal = currentBets.filter(b => b.side === 'HEADS').reduce((a, b) => a + b.amount, 0);
     const tailsTotal = currentBets.filter(b => b.side === 'TAILS').reduce((a, b) => a + b.amount, 0);
 
-    // Smart AUTO Engine: Jis side kam paisa hai usko winner banao
     let projectedOutcome = 'HEADS';
     if (headsTotal < tailsTotal) {
         projectedOutcome = 'HEADS';
@@ -101,7 +99,6 @@ setInterval(async () => {
         if (forcedOutcome === 'FORCE_HEADS') finalOutcome = 'HEADS';
         if (forcedOutcome === 'FORCE_TAILS') finalOutcome = 'TAILS';
 
-        // Process Settlements
         let winners = [];
         let roundPayout = 0;
         let roundBetTotal = headsTotal + tailsTotal;
@@ -113,7 +110,6 @@ setInterval(async () => {
                 roundPayout += winAmount;
                 winners.push({ username: bet.username, amount: winAmount });
                 
-                // Atomically update user balance in MongoDB
                 await User.findOneAndUpdate(
                     { username: bet.username },
                     { $inc: { balance: winAmount } }
@@ -133,7 +129,6 @@ setInterval(async () => {
             tailsTotal
         });
 
-        // Reset Round State
         currentBets = [];
         gameTimer = 30;
     }
@@ -187,7 +182,6 @@ io.on('connection', (socket) => {
                 return callback({ success: false, msg: "Insufficient Balance!" });
             }
 
-            // Deduct balance atomically in MongoDB
             user.balance -= data.amount;
             await user.save();
 
@@ -225,7 +219,6 @@ io.on('connection', (socket) => {
                 return callback({ success: false, msg: "Insufficient balance!" });
             }
 
-            // Deduct balance upfront
             user.balance -= data.amount;
             await user.save();
 
@@ -238,6 +231,18 @@ io.on('connection', (socket) => {
             callback({ success: true, newBalance: user.balance, msg: "Withdrawal Requested!" });
         } catch (e) {
             callback({ success: false, msg: "Error processing withdrawal." });
+        }
+    });
+
+    // NEW ADDED: Fetch user's deposit and withdrawal history
+    socket.on('get_user_history', async (callback) => {
+        if (!socket.username) return callback({ success: false, msg: "Please login first!" });
+        try {
+            const deposits = await Deposit.find({ username: socket.username }).sort({ createdAt: -1 });
+            const withdrawals = await Withdrawal.find({ username: socket.username }).sort({ createdAt: -1 });
+            callback({ success: true, deposits, withdrawals });
+        } catch (e) {
+            callback({ success: false, msg: "Error fetching history." });
         }
     });
 
@@ -290,7 +295,6 @@ io.on('connection', (socket) => {
             wd.status = action;
             await wd.save();
             if (action === 'REJECTED') {
-                // Refund money on withdrawal rejection
                 await User.findOneAndUpdate({ username: wd.username }, { $inc: { balance: wd.amount } });
             }
             io.emit('admin_data_refresh');
@@ -314,7 +318,7 @@ io.on('connection', (socket) => {
     });
 });
 
-// 2. Fallback Route: Kisi bhi route par jaoge toh public/index.html send karega
+// 2. Fallback Route
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
